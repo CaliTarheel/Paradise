@@ -19,6 +19,7 @@ import os
 import numpy as np
 import pygplates
 
+from paradise import plumes
 from paradise.core import sphere
 
 ANCHOR = 0
@@ -129,10 +130,22 @@ def _windows(history):
         yield k, snapshot, begin, end + 1e-3
 
 
+def _hotspots(history, out):
+    """Each hotspot once, fixed on the anchor plate, for as long as it lasts."""
+    project = history.project
+    for h in getattr(history.current, 'hotspots', []):
+        lon, lat = h['point']
+        end = project.age_ma(h['ended_myr']) if h['ended_myr'] is not None else -1e-3
+        out['Hotspots'].append(_feature('HotSpot', pygplates.PointOnSphere(lat, lon), h['name'], ANCHOR,
+                                        project.age_ma(h['born_myr']), end))
+
+
 def layers(history) -> dict:
     """{layer file name: [features]} for the whole history."""
     out = {name: [] for name in ('Plates', 'Continents', 'Cratons', 'Island arcs', 'Continental arcs',
-                                 'Accreted terranes', 'Rifts', 'Failed rifts', 'Ocean crust', 'Divergent', 'Convergent',
+                                 'Accreted terranes', 'Rifts', 'Failed rifts', 'Active orogenies',
+                                 'Former orogenies', 'Old orogenies', 'Active LIPs', 'Former LIPs',
+                                 'Hotspots', 'Hotspot trails', 'Ocean crust', 'Divergent', 'Convergent',
                                  'Transform')}
     for k, snapshot, begin, end in _windows(history):
         world = snapshot.world
@@ -163,7 +176,23 @@ def layers(history) -> dict:
             out['Failed rifts' if failed else 'Rifts'].append(_feature('ContinentalRift', geometry, '%s into plate %d' % (r['kind'].lower(), r['new']),
                                          r['plate'], begin, end,
                                          'split plate %d at %.0f Ma' % (r['new'], history.project.age_ma(r['time_myr']))))
+        for belt in getattr(snapshot, 'orogens', []):
+            for polygon in _polygons(belt['shape'], np.eye(3)):
+                out['%s orogenies' % belt['kind'].capitalize()].append(_feature(
+                    'OrogenicBelt', polygon, '%s orogeny' % belt['kind'], belt['plate'], begin, end,
+                    'since %.0f Ma' % history.project.age_ma(belt['since_myr'])))
+        for h, plate, points, first, last in plumes.trails(getattr(snapshot, 'hotspots', [])):
+            geometry = pygplates.PolylineOnSphere(_points_on_sphere(points))
+            out['Hotspot trails'].append(_feature('UnclassifiedFeature', geometry, '%s trail' % h['name'], plate, begin,
+                                                  end, 'from %.0f to %.0f Ma' % (history.project.age_ma(first),
+                                                                                  history.project.age_ma(last))))
         for f in getattr(snapshot, 'features', []):
+            if f.kind == 'lip':
+                young = snapshot.time_myr - f.born_myr <= plumes.ACTIVE_LIP_MYR + 1e-6
+                for polygon in _polygons(f.shape, np.eye(3)):
+                    out['Active LIPs' if young else 'Former LIPs'].append(_feature(
+                        'LargeIgneousProvince', polygon, f.origin, f.plate, begin, end, _story(f, history.project)))
+                continue
             layer, kind = FEATURE_LAYERS[f.kind]
             for polygon in _polygons(f.shape, np.eye(3)):
                 out[layer].append(_feature(kind, polygon, '%s %d' % (f.kind.replace('_', ' '), f.ident), f.plate,
@@ -185,6 +214,7 @@ def layers(history) -> dict:
                     feature.set_enumeration(pygplates.PropertyName.gpml_subduction_polarity,
                                             'Left' if plate == b.left else 'Right')
                 out[layer].append(feature)
+    _hotspots(history, out)
     return out
 
 

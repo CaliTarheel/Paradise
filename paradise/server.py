@@ -27,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 
-from paradise import gplates
+from paradise import gplates, plumes
 from paradise.core import render, sphere
 from paradise.history import History, Project
 from paradise.terranes import TERRANE_MAX_KM2
@@ -86,10 +86,12 @@ class App:
                     continent_share=continent / sphere.SPHERE_KM2,
                     map='data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii'),
                     plate_of=base64.b64encode(plate_of.astype('<u2').tobytes()).decode('ascii'),
-                    map_width=MAP_WIDTH, lines=_lines(world, snapshot.cratons, snapshot.features), warnings=snapshot.warnings,
+                    map_width=MAP_WIDTH,
+                    lines=_lines(world, snapshot.cratons, snapshot.features, snapshot.orogens, snapshot.hotspots), warnings=snapshot.warnings,
                     events=_events(snapshot), trenches=_trenches(snapshot), auto_trenches=project.auto_trenches,
                     features=_features(snapshot, project), collisions=list(getattr(snapshot, 'collisions', [])),
-                    kept_apart=sorted(sorted(pair) for pair in getattr(world, 'kept_apart', ())))
+                    kept_apart=sorted(sorted(pair) for pair in getattr(world, 'kept_apart', ())),
+                    no_accretion=sorted(sorted(pair) for pair in getattr(world, 'no_accretion', ())))
 
     # ------------------------------------------------------------------ actions
     def build(self, body) -> dict:
@@ -109,7 +111,7 @@ class App:
 
     def preview(self, body) -> dict:
         snapshot = self.history.preview(_poles(body), body.get('events') or [])
-        return dict(lines=_lines(snapshot.world, snapshot.cratons, snapshot.features), warnings=snapshot.warnings, events=_events(snapshot),
+        return dict(lines=_lines(snapshot.world, snapshot.cratons, snapshot.features, snapshot.orogens, snapshot.hotspots), warnings=snapshot.warnings, events=_events(snapshot),
                     trenches=_trenches(snapshot),
                     message='Preview of %.0f Ma' % self.history.project.age_ma(snapshot.time_myr))
 
@@ -175,7 +177,7 @@ def _features(snapshot, project) -> list:
             for f in getattr(snapshot, 'features', [])]
 
 
-def _lines(world, cratons=(), features=()) -> dict:
+def _lines(world, cratons=(), features=(), orogens=(), hotspots=()) -> dict:
     """Boundaries by kind, plate and craton outlines, as lon/lat polylines for the browser to draw."""
     boundaries = []
     for b in world.boundaries:
@@ -205,7 +207,21 @@ def _lines(world, cratons=(), features=()) -> dict:
                 world_ring = sphere.rotate(ring, frame)
                 feature_lines.append(dict(kind=f.kind, ident=f.ident, plate=f.plate,
                                           points=_lonlat(np.vstack((world_ring, world_ring[:1])))))
-    return dict(boundaries=boundaries, outlines=outlines, cratons=craton_lines, features=feature_lines)
+    belt_lines = []
+    for belt in orogens:
+        frame = world.frame(belt['plate'])
+        for rings in sphere.polygons(belt['shape']):
+            for ring in rings:
+                world_ring = sphere.rotate(ring, frame)
+                belt_lines.append(dict(kind=belt['kind'], plate=belt['plate'],
+                                       points=_lonlat(np.vstack((world_ring, world_ring[:1])))))
+    trail_lines = []
+    for h, plate, points, first, last in plumes.trails(hotspots):
+        if plate in world.regions:
+            trail_lines.append(dict(hotspot=h['ident'], plate=plate, points=_lonlat(sphere.rotate(points, world.frame(plate)))))
+    spots = [dict(ident=h['ident'], name=h['name'], point=h['point'], active=h['ended_myr'] is None) for h in hotspots]
+    return dict(boundaries=boundaries, outlines=outlines, cratons=craton_lines, features=feature_lines,
+                orogens=belt_lines, trails=trail_lines, hotspots=spots)
 
 
 # Bookkeeping the core does as plates move, not worth a person's attention: slivers below the

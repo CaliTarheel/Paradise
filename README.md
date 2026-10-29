@@ -108,6 +108,29 @@ decide that yourself, pick the boundary between them:
   between them goes on shortening and thickening, and a warning says so each step.
 - **Let them weld** undoes that.
 
+On a trench, **Continent here always collides** stops terranes accreting between those two plates,
+however small they are, until **Let terranes accrete here** undoes it.
+
+The map also shows mountain belts, filed as Artifexia files them:
+- **active** along current collisions;
+- **former** along sutures less than 100 Myr old;
+- **old** along older sutures, worn down but still a belt of deformed crust.
+
+## Hotspots and large igneous provinces
+
+Set **Clicking the map** to **places a plume**, click where the plume rises, optionally name it,
+and choose:
+- **Hotspot**: a point fixed in the mantle. Every 2.5 Myr the plate over it gets a trail mark that
+  then rides away with the plate, so the trail traces the plate's motion over the hotspot.
+- **LIP and hotspot**: a plume head of the given radius erupts at once, and its tail stays as a
+  hotspot.
+  - Over continent the LIP is a flood-basalt province.
+  - Over ocean it becomes an oceanic plateau: 30 km thick crust that resists subduction, so it
+    can later accrete at a trench like any terrane.
+- **LIP only**: the same, without the hotspot.
+
+**Hotspots** lists them all. **End** declares that a hotspot dies out at the next step.
+
 ## Rift a plate, or open a back-arc
 
 **Rifts.**
@@ -154,8 +177,13 @@ with its story: where it formed, and when and to which plate it accreted.
 **Export to GPlates** writes a folder beside the project file containing:
 - `rotation.rot`;
 - `Plates`, `Continents`, `Cratons`, `Island arcs`, `Continental arcs`, `Accreted terranes`,
-  `Rifts`, `Failed rifts`, `Ocean crust`, `Divergent`, `Convergent` and `Transform` `.gpml`
-  layers. A rift whose two sides have welded back into one plate is a failed rift.
+  `Rifts`, `Failed rifts`, `Active orogenies`, `Former orogenies`, `Old orogenies`, `Active LIPs`,
+  `Former LIPs`, `Hotspots`, `Hotspot trails`, `Ocean crust`, `Divergent`, `Convergent` and
+  `Transform` `.gpml` layers.
+- A rift whose two sides have welded back into one plate is a failed rift.
+- A LIP is active in the step it erupts, and former after that.
+- Hotspots are fixed on the anchor plate 000. Their trails are carried by the plates they
+  mark.
 
 A plate made by a rift or a back-arc rotates relative to the plate it came from, as in a
 hand-built rotation tree. Every other plate rotates relative to the anchor plate 000.
@@ -180,8 +208,17 @@ the polarity GPlates reads as the overriding plate's side. Edits made in GPlates
 - **Arcs and terranes.**
   - Arcs grow only as a band 30 km either side of the volcanic front, and render as plain
     lowland, without volcanic relief.
-  - Whether a piece of continent accretes or collides is decided by its size alone; you cannot yet
-    choose for one piece.
+  - Whether a piece of continent accretes or collides is decided by its size, or by the pair of
+    plates; you cannot choose for one piece between the same two plates.
+- **Plumes.**
+  - Hotspots do not move in the mantle; there is no hotspot drift.
+  - A trail is a line of marks and adds no crust: there are no seamount chains or volcanic
+    islands along it.
+  - A LIP does not weaken its plate, so it never starts a rift by itself; declare one if you want
+    one.
+- **Orogenies.**
+  - Belts are a fixed 250 km either side of a collision or suture, on continent only.
+  - They do not yet raise mountains on the map.
 - **Rifts.**
   - A rift splits a plate at once; there is no slow continental rifting stage before the ocean
     opens.

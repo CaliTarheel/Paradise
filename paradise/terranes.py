@@ -196,8 +196,9 @@ def accrete(world, features: list, rotations: dict, dt: float) -> list:
 
 
 def _next_accretion(world, rotations, dt):
+    barred = getattr(world, 'no_accretion', ())
     for b, start, stop, over, down in _trench_runs(world):
-        if down not in world.regions or over not in world.regions:
+        if down not in world.regions or over not in world.regions or frozenset((over, down)) in barred:
             continue
         opening, _ = segment_motion(b.points[start:stop + 1], rotations.get(b.left, np.zeros(3)),
                                     rotations.get(b.right, np.zeros(3)))

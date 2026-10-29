@@ -26,6 +26,11 @@ collision has closed SUTURE_KM):
   closed SUTURE_KM, and the core welds them before anything moves.
 - `keep_apart`: never weld them, from this step on; they go on colliding.
 - `allow_weld`: undo `keep_apart`.
+- `no_accretion`: continent reaching a trench between these plates collides, however small, from
+  this step on (paradise.terranes reads the world's `no_accretion` set); `allow_accretion` undoes it.
+
+Plumes (paradise.plumes): `hotspot` at a point, `end_hotspot` by number, and `lip` at a point
+with a radius, leaving a hotspot behind unless `with_hotspot` is false.
 """
 from __future__ import annotations
 
@@ -37,8 +42,11 @@ from paradise.core.regions import SUTURE_KM
 from paradise.core.topology import segment_motion
 
 REACH_KM = 60.
-KINDS = ('subduction', 'end_subduction', 'rift', 'backarc', 'weld', 'keep_apart', 'allow_weld')
-PAIRS = ('weld', 'keep_apart', 'allow_weld')   # declarations about two plates, not a stretch
+KINDS = ('subduction', 'end_subduction', 'rift', 'backarc', 'weld', 'keep_apart', 'allow_weld',
+         'no_accretion', 'allow_accretion',
+         'hotspot', 'end_hotspot', 'lip')
+PLUMES = ('hotspot', 'end_hotspot', 'lip')   # paradise.plumes, applied by the history
+PAIRS = ('weld', 'keep_apart', 'allow_weld', 'no_accretion', 'allow_accretion')   # about two plates, not a stretch
 SPLITS = ('rift', 'backarc')
 # A plate carried by a slab moves fast (Scotese's first rule of thumb): below this at its trench,
 # the downgoing plate's motion is worth a second look.
@@ -56,6 +64,22 @@ def validate(event: dict) -> dict:
         pole = [float(v) for v in pole]
         if len(pole) != 3 or not -90. <= pole[0] <= 90.:
             raise ValueError('a pole is latitude, longitude and a rate in degrees per Myr')
+    if kind in ('hotspot', 'lip'):
+        lon, lat = (float(v) for v in event.get('point', ()))
+        if not -90. <= lat <= 90.:
+            raise ValueError('a %s needs a point on the map' % kind)
+        result = dict(kind=kind, point=[lon, lat])
+        if event.get('name'):
+            result['name'] = str(event['name'])
+        if kind == 'lip':
+            radius = float(event.get('radius_km', 800.))
+            if not 50. <= radius <= 3000.:
+                raise ValueError('a LIP is between 50 and 3000 km in radius')
+            result['radius_km'] = radius
+            result['with_hotspot'] = bool(event.get('with_hotspot', True))
+        return result
+    if kind == 'end_hotspot':
+        return dict(kind=kind, hotspot=int(event['hotspot']))
     if kind == 'rift':
         points = [[float(lon), float(lat)] for lon, lat in event.get('points', [])]
         if len(points) < 2:
@@ -91,8 +115,8 @@ def apply(world, events: list) -> list:
     notes = []
     for event in events:
         event = validate(event)
-        if event['kind'] in SPLITS:
-            continue   # paradise.rifting, applied by the history
+        if event['kind'] in SPLITS or event['kind'] in PLUMES:
+            continue   # paradise.rifting and paradise.plumes, applied by the history
         if event['kind'] in PAIRS:
             notes += _pair(world, event)
             continue
@@ -126,6 +150,10 @@ def apply(world, events: list) -> list:
 
 def _pair(world, event) -> list:
     pair = frozenset(event['plates'])
+    if event['kind'] in ('no_accretion', 'allow_accretion'):
+        barred = set(getattr(world, 'no_accretion', ()))
+        world.no_accretion = barred | {pair} if event['kind'] == 'no_accretion' else barred - {pair}
+        return []
     kept = set(getattr(world, 'kept_apart', ()))
     if event['kind'] == 'keep_apart':
         world.kept_apart = kept | {pair}

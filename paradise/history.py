@@ -25,7 +25,7 @@ import numpy as np
 import spherely
 
 from paradise import events as declared
-from paradise import rifting, terranes
+from paradise import orogeny, plumes, rifting, terranes
 from paradise.core import sphere
 from paradise.core.world import INITIATION_KM
 from paradise.paint import world_from_grid
@@ -96,6 +96,8 @@ class Snapshot:
     rifts: list = field(default_factory=list)      # paradise.rifting: lines plates were split along
     new_poles: dict = field(default_factory=dict)  # plate made this step -> the pole it was given
     collisions: list = field(default_factory=list)  # paradise.events.collisions at the end of the step
+    orogens: list = field(default_factory=list)     # paradise.orogeny.belts at the end of the step
+    hotspots: list = field(default_factory=list)    # paradise.plumes: every hotspot so far, with its trail
 
 
 @dataclass
@@ -148,7 +150,7 @@ class Project:
         return self.start_age_ma - time_myr
 
 
-CACHE_VERSION = 5
+CACHE_VERSION = 7
 
 
 class History:
@@ -256,6 +258,21 @@ class History:
                 vectors[new] = pole_vector(*event['pole'])
                 new_poles[new] = list(event['pole'])
             split.append(record)
+        hotspots = copy.deepcopy(before.hotspots)
+        for event in events:
+            if event['kind'] == 'hotspot':
+                split.append(plumes.place_hotspot(hotspots, event, world.time_myr))
+            elif event['kind'] == 'end_hotspot':
+                found = plumes.end_hotspot(hotspots, event['hotspot'], world.time_myr)
+                notes += [f for f in found if 'text' in f]
+                split += [f for f in found if 'text' not in f]
+            elif event['kind'] == 'lip':
+                split.append(plumes.emplace_lip(world, features, event, world.time_myr))
+                if event.get('with_hotspot', True):
+                    split.append(plumes.place_hotspot(hotspots, dict(point=event['point'],
+                                                                     name=event.get('name')), world.time_myr))
+        if any(e['kind'] == 'lip' for e in events):
+            world.regions = world._from_crust()
         # The new poles take effect now: type every boundary from them before the first sub-step, so
         # its opening is booked as ridge (not as a sliver of a boundary typed by the old motion).
         # Its events (a declared weld happens here) are the step's first.
@@ -270,6 +287,8 @@ class History:
             entry['events'] = accreted + entry['events']
             remaining -= sub
             features = terranes.tidy(world, features)
+            plumes.rehome_marks(world, hotspots)
+            plumes.mark_trails(world, hotspots, world.time_myr)
             entries.append(_compact(entry))
             frames.append((world.time_myr, _frames(world)))
             cratons = _rehome(cratons, world)
@@ -287,6 +306,8 @@ class History:
             entries[0]['events'] = _compact(dict(events=split))['events'] + entries[0].get('events', [])
         snapshot.trenches = trenches
         snapshot.collisions = declared.collisions(world)
+        snapshot.orogens = orogeny.belts(world)
+        snapshot.hotspots = hotspots
         kept = [dict(kind='kept_apart', plates=c['plates'], text=(
             'Plates %d and %d collide along %d km but are kept apart; the continent between them goes '
             'on shortening and thickening.' % (c['plates'][0], c['plates'][1], c['length_km'])))

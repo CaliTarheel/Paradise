@@ -127,6 +127,29 @@ They keep their identity and story while the core's crust pieces merge and split
 sub-step a feature is clipped to its plate's continental crust, and moved to the plate under it if
 its own plate has gone.
 
+## Orogenies, hotspots and LIPs
+
+**Orogenies** (`paradise/orogeny.py`) are derived from the world at the end of each step, not
+carried. Each belt is the continental crust within 250 km of a line:
+- **active**: along current collisions;
+- **former**: along sutures made less than 100 Myr ago;
+- **old**: along older sutures.
+
+The suture lines the core keeps when it welds two plates are what remembers where an orogeny was.
+
+**Plumes** (`paradise/plumes.py`) are declared at a point.
+- **A hotspot** is fixed in the anchor frame. After every sub-step the plate over it gets a trail
+  mark in that plate's frame, so the trail moves with the plate. Marks on a plate that has gone
+  move to the plate now under them, as cratons do.
+- **A LIP** is a cap emplaced at once.
+  - Its ocean becomes 30 km oceanic plateau, continental crust in the core. It is therefore
+    buoyant, and accretes or collides under the terrane rules.
+  - Its continent is recorded as a flood-basalt province.
+  - It leaves a hotspot at its centre unless declared without one.
+
+A pair of plates can be barred from accretion (`no_accretion`, a set on the world that
+`terranes.accrete` skips), so that even a small terrane collides there.
+
 ## The painted start
 
 The editor paints two equirectangular grids at 0.5 degrees: plate numbers, and crust (ocean,
@@ -161,9 +184,10 @@ GPlates is the viewer and the place for final polish. Nothing edited there comes
    - **Done, as rules rather than declarations:** island and continental arcs behind lasting
      trenches; terranes that accrete instead of colliding.
    - **Done:** rift along a drawn line; open a back-arc behind a trench.
-   - **To do:** trench jump, weld or keep apart, plume or LIP.
+   - **Done:** weld or keep apart; hotspots and LIPs; accretion barred per pair.
+   - **To do:** trench jump.
 4. An advisor that proposes poles and events from the Scotese rules of thumb, and an autopilot that
    runs several steps and stops at any collision, rift, plate loss or warning.
-5. Secondary features: hotspot trails, LIPs, island arcs, back-arcs, accreted terranes, and
-   orogenies that age from active to former to old.
+5. **Done:** secondary features: hotspot trails, LIPs, island arcs, back-arcs, accreted terranes,
+   and orogenies that age from active to former to old.
 6. Elevation and maps, an optional goSPL erosion pass, and Aerie's 72 by 46 ROCKE-3D input.

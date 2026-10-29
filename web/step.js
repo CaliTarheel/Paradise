@@ -5,7 +5,8 @@ const KIND_COLOURS = {
   ridge: '#d0362b', trench: '#2a5fae', transform: '#2f8a4f', converging: '#c78a12', collision: '#7a4a1c',
 };
 
-const FEATURE_COLOURS = { island_arc: '#e2561f', continental_arc: '#b02a8a', terrane: '#6b3fa0' };
+const OROGEN_COLOURS = { active: '#c0392b', former: '#8e5a2a', old: '#9c9c8a' };
+const FEATURE_COLOURS = { island_arc: '#e2561f', continental_arc: '#b02a8a', terrane: '#6b3fa0', lip: '#7d1d6b' };
 
 const stepper = {
   state: null,
@@ -19,6 +20,8 @@ const stepper = {
   declared: [],
   // A rift line being drawn: lon/lat points.
   rift: [],
+  // A plume being placed: [lon, lat] or null.
+  plume: null,
 
   async load() {
     const r = await fetch('/api/state');
@@ -39,6 +42,9 @@ const stepper = {
     this.declared = [];
     this.rift = [];
     this.riftPanel();
+    this.plume = null;
+    this.plumePanel();
+    this.hotspotList(state.lines.hotspots);
     this.table();
     this.history();
     this.notes(state.warnings, state.events);
@@ -76,12 +82,51 @@ const stepper = {
     }
   },
 
+  hotspotList(hotspots) {
+    const list = document.getElementById('hotspots');
+    list.innerHTML = '';
+    for (const h of hotspots || []) {
+      const li = document.createElement('li');
+      li.textContent = `${h.name} (${h.point[0].toFixed(1)}, ${h.point[1].toFixed(1)})${h.active ? '' : ', ended'}`;
+      if (h.active) {
+        const b = document.createElement('button');
+        b.textContent = 'End';
+        b.addEventListener('click', () => {
+          this.declared.push({ kind: 'end_hotspot', hotspot: h.ident, name: h.name });
+          this.preview = null; this.declaredList(); this.draw();
+        });
+        li.appendChild(b);
+      }
+      list.appendChild(li);
+    }
+    if (!list.children.length) list.innerHTML = '<li class="hint">None. Place a plume on the map to add one.</li>';
+  },
+
+  plumePanel() {
+    const panel = document.getElementById('plume-panel');
+    panel.hidden = !this.plume;
+    if (!this.plume) return;
+    document.getElementById('plume-text').textContent =
+      `Plume at ${this.plume[0].toFixed(1)}, ${this.plume[1].toFixed(1)}. A hotspot stays fixed in the mantle and leaves a trail on the plates that pass over it; a LIP erupts at once, making oceanic plateau over ocean and flood basalt over continent.`;
+  },
+
+  declarePlume(kind, withHotspot) {
+    const event = { kind, point: this.plume.slice() };
+    const name = document.getElementById('plume-name').value.trim();
+    if (name) event.name = name;
+    if (kind === 'lip') { event.radius_km = Number(document.getElementById('plume-radius').value); event.with_hotspot = withHotspot; }
+    this.declared.push(event);
+    this.plume = null;
+    this.preview = null;
+    this.plumePanel(); this.declaredList(); this.draw();
+  },
+
   featureList(features) {
     const list = document.getElementById('features');
     list.innerHTML = '';
     for (const f of features || []) {
       const li = document.createElement('li');
-      const name = { island_arc: 'Island arc', continental_arc: 'Continental arc', terrane: 'Terrane' }[f.kind] || f.kind;
+      const name = { island_arc: 'Island arc', continental_arc: 'Continental arc', terrane: 'Terrane', lip: 'LIP' }[f.kind] || f.kind;
       li.textContent = `${name} ${f.ident} on plate ${f.plate}, ${Math.round(f.area_km2 / 1000).toLocaleString()} thousand km²: ${f.story}.`;
       list.appendChild(li);
     }
@@ -152,6 +197,11 @@ const stepper = {
     document.getElementById('weld').onclick = () => this.declarePair('weld');
     document.getElementById('keep-apart').onclick = () => this.declarePair('keep_apart');
     document.getElementById('allow-weld').onclick = () => this.declarePair('allow_weld');
+    const barred = (this.state.no_accretion || []).some(([x, y]) => x === a && y === b);
+    document.getElementById('no-accretion').hidden = barred || run.kind !== 'trench';
+    document.getElementById('allow-accretion').hidden = !barred;
+    document.getElementById('no-accretion').onclick = () => this.declarePair('no_accretion');
+    document.getElementById('allow-accretion').onclick = () => this.declarePair('allow_accretion');
     this.newPolePanel();
     document.getElementById('pick-clear').onclick = () => { this.pick = null; this.pickPanel(); this.draw(); };
   },
@@ -341,7 +391,25 @@ const stepper = {
       polyline(ctx, o.points, w, h, selected ? '#ffffff' : 'rgba(0,0,0,0.35)', selected ? 2.5 : 1);
     }
     for (const c of lines.cratons || []) polyline(ctx, c.points, w, h, 'rgba(70,45,20,0.9)', 1.5, [3, 3]);
+    for (const o of lines.orogens || []) polyline(ctx, o.points, w, h, OROGEN_COLOURS[o.kind] || '#000', 2, [2, 3]);
     for (const f of lines.features || []) polyline(ctx, f.points, w, h, FEATURE_COLOURS[f.kind] || '#000', 1.5);
+    for (const t of lines.trails || []) {
+      polyline(ctx, t.points, w, h, 'rgba(0,0,0,0.5)', 4);
+      polyline(ctx, t.points, w, h, '#ffd23f', 2);
+    }
+    for (const s of lines.hotspots || []) {
+      const [x, y] = toCanvas(s.point, w, h);
+      ctx.beginPath(); ctx.arc(x, y, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = s.active ? '#ffd23f' : 'rgba(255,210,63,0.4)'; ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    const plumes = this.declared.filter((e) => e.kind === 'hotspot' || e.kind === 'lip').map((e) => e.point);
+    if (this.plume) plumes.push(this.plume);
+    for (const pt of plumes) {
+      const [x, y] = toCanvas(pt, w, h);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, 2 * Math.PI); ctx.stroke();
+    }
     for (const b of lines.boundaries) {
       polyline(ctx, b.points, w, h, KIND_COLOURS[b.kind] || '#000', 2.5);
       if (b.kind === 'trench' && b.overriding != null) teeth(ctx, b.points, w, h, b.overriding === b.plates[0], KIND_COLOURS.trench);
@@ -397,6 +465,9 @@ function describe(e) {
     case 'plate_split': return `Plate ${e.plate} came apart; plate ${e.new} is the new piece.`;
     case 'absorbed': return `A piece of plate ${e.plate} (${Math.round(e.area_km2 / 1000)} thousand km²) joined plate ${e.into}.`;
     case 'plate_gone': return `Plate ${e.plate} is gone.`;
+    case 'hotspot_placed': return `Hotspot ${e.name} rose.`;
+    case 'hotspot_ended': return `Hotspot ${e.name} died out.`;
+    case 'lip_erupted': return `${e.name} erupted: ${Math.round(e.plateau_km2 / 1000)} thousand km² of oceanic plateau and ${Math.round(e.flood_km2 / 1000)} thousand km² of flood basalt.`;
     case 'arc_born': return `An island arc (${Math.round(e.area_km2 / 1000)} thousand km²) rose on plate ${e.plate} behind its trench with plate ${e.plates[0] === e.plate ? e.plates[1] : e.plates[0]}.`;
     case 'accreted': return `A terrane of ${Math.round(e.area_km2 / 1000)} thousand km² from plate ${e.plate} accreted to plate ${e.into}; the trench stepped outboard of it.`;
     case 'rift': return e.name && /forearc/.test(e.name)
@@ -408,6 +479,9 @@ function describe(e) {
 
 function describeDeclaration(e) {
   const pole = e.pole ? `, new plate pole ${e.pole[0]}, ${e.pole[1]} at ${e.pole[2]}°/Myr` : '';
+  if (e.kind === 'hotspot') return `Hotspot${e.name ? ' ' + e.name : ''} at ${e.point[0].toFixed(1)}, ${e.point[1].toFixed(1)}`;
+  if (e.kind === 'lip') return `LIP${e.name ? ' ' + e.name : ''} of ${e.radius_km} km at ${e.point[0].toFixed(1)}, ${e.point[1].toFixed(1)}${e.with_hotspot ? ', leaving a hotspot' : ''}`;
+  if (e.kind === 'end_hotspot') return `End hotspot ${e.name || e.hotspot}`;
   if (e.kind === 'rift') return `Rift across plate ${e.plate}, new plate on its ${e.new_side}${pole}`;
   const [a, b] = e.plates;
   if (e.kind === 'backarc') return `Back-arc behind the trench between plates ${a} and ${b}, on plate ${e.overriding}${pole}`;
@@ -416,6 +490,8 @@ function describeDeclaration(e) {
   if (e.kind === 'weld') return `Weld plates ${a} and ${b} into one`;
   if (e.kind === 'keep_apart') return `Keep plates ${a} and ${b} apart when they collide`;
   if (e.kind === 'allow_weld') return `Let plates ${a} and ${b} weld when they collide`;
+  if (e.kind === 'no_accretion') return `Continent reaching the trench between plates ${a} and ${b} collides`;
+  if (e.kind === 'allow_accretion') return `Let terranes accrete at the trench between plates ${a} and ${b}`;
   return e.kind;
 }
 
@@ -490,6 +566,7 @@ document.querySelectorAll('input[name=map-mode]').forEach((r) => r.addEventListe
   document.getElementById('map-hint').textContent = {
     boundary: 'Click a boundary to pick it. Click it again to keep only the stretch between your two clicks.',
     rift: 'Click points along the rift, starting and ending beyond the edges of the plate it splits.',
+    plume: 'Click where the plume rises.',
     plate: "Click a plate to select its row. Shift-click the map to put the selected plate's pole there.",
   }[mapMode()];
 }));
@@ -500,6 +577,11 @@ document.getElementById('map').addEventListener('click', (e) => {
   const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
   if (mapMode() === 'boundary' && !e.shiftKey) {
     stepper.pickAt(fx * canvas.width, fy * canvas.height);
+    return;
+  }
+  if (mapMode() === 'plume' && !e.shiftKey) {
+    stepper.plume = [Math.round((fx * 360 - 180) * 100) / 100, Math.round((90 - fy * 180) * 100) / 100];
+    stepper.plumePanel(); stepper.draw();
     return;
   }
   if (mapMode() === 'rift' && !e.shiftKey) {
@@ -548,3 +630,7 @@ document.getElementById('rift-clear').addEventListener('click', () => {
   stepper.rift = []; stepper.riftPlateChosen = false; stepper.riftPanel(); stepper.draw();
 });
 document.getElementById('rift-plate').addEventListener('change', () => { stepper.riftPlateChosen = true; });
+document.getElementById('plume-hotspot').addEventListener('click', () => stepper.declarePlume('hotspot'));
+document.getElementById('plume-lip').addEventListener('click', () => stepper.declarePlume('lip', true));
+document.getElementById('plume-lip-only').addEventListener('click', () => stepper.declarePlume('lip', false));
+document.getElementById('plume-clear').addEventListener('click', () => { stepper.plume = null; stepper.plumePanel(); stepper.draw(); });

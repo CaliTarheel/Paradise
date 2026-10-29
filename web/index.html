@@ -117,6 +117,11 @@
         <span class="key island-arc">Island arc</span>
         <span class="key continental-arc">Continental arc</span>
         <span class="key terrane">Terrane</span>
+        <span class="key orogen-active">Active orogeny</span>
+        <span class="key orogen-former">Former</span>
+        <span class="key orogen-old">Old</span>
+        <span class="key lip">LIP</span>
+        <span class="key hotspot">Hotspot trail</span>
         <span class="key preview">Preview</span>
       </div>
       <div class="row" role="radiogroup" aria-label="What a click on the map does">
@@ -124,6 +129,7 @@
         <label><input type="radio" name="map-mode" value="plate" checked> selects a plate</label>
         <label><input type="radio" name="map-mode" value="boundary"> picks a boundary</label>
         <label><input type="radio" name="map-mode" value="rift"> draws a rift</label>
+        <label><input type="radio" name="map-mode" value="plume"> places a plume</label>
       </div>
       <p class="hint" id="map-hint">Click a plate to select its row. Shift-click the map to put the selected plate's pole there.</p>
 
@@ -137,6 +143,8 @@
           <button id="weld">Weld these plates now</button>
           <button id="keep-apart">Keep these plates apart</button>
           <button id="allow-weld">Let them weld</button>
+          <button id="no-accretion">Continent here always collides</button>
+          <button id="allow-accretion">Let terranes accrete here</button>
           <button id="pick-clear">Clear</button>
         </div>
       </div>
@@ -155,6 +163,20 @@
           <button id="rift-declare">Declare the rift</button>
           <button id="rift-undo">Remove last point</button>
           <button id="rift-clear">Clear</button>
+        </div>
+      </div>
+
+      <div id="plume-panel" class="card" hidden>
+        <p id="plume-text"></p>
+        <div class="row">
+          <label>Name <input id="plume-name" type="text" value=""></label>
+          <label>LIP radius km <input id="plume-radius" type="number" value="800" min="50" max="3000" step="50"></label>
+        </div>
+        <div class="row">
+          <button id="plume-hotspot">Hotspot</button>
+          <button id="plume-lip">LIP and hotspot</button>
+          <button id="plume-lip-only">LIP only</button>
+          <button id="plume-clear">Clear</button>
         </div>
       </div>
 
@@ -183,6 +205,8 @@
           <p class="hint">Click a trench to pick it, to flip it or end it.</p>
           <h2>Arcs and terranes</h2>
           <ul id="features"></ul>
+          <h2>Hotspots</h2>
+          <ul id="hotspots"></ul>
         </div>
       </div>
     </div>

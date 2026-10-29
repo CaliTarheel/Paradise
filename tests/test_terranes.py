@@ -98,6 +98,15 @@ class TerraneTests(unittest.TestCase):
         self.assertLess(west, float(lon))
         self.assertEqual(terrane[0].accreted[0]['to_plate'], 2)
 
+    def test_a_pair_barred_from_accretion_collides_instead(self):
+        history = History(world_with_a_microcontinent())
+        history.commit({1: EAST}, events=[TRENCH, dict(kind='no_accretion', plates=[1, 2])])
+        history.commit({1: EAST})
+        snapshot = history.commit({1: EAST})
+        kinds = {e['kind'] for entry in snapshot.entries for e in entry.get('events', [])}
+        self.assertNotIn('accreted', kinds)
+        self.assertIn('collision', kinds)
+
     def test_a_continent_larger_than_a_terrane_does_not_accrete(self):
         project = world_with_a_microcontinent(radius_km=900.)   # about 2.5 million km2
         self.assertGreater(continent_km2(History(project).current.world, 1), terranes.TERRANE_MAX_KM2)
@@ -154,6 +163,23 @@ class CollisionTests(unittest.TestCase):
         self.assertTrue({1, 2} <= set(history.current.world.plates()))
         self.assertIn('kept_apart', {w['kind'] for w in history.current.warnings})
         self.assertTrue(history.current.collisions[0]['kept_apart'])
+
+    def test_orogenies_are_active_while_colliding_then_former_after_the_weld(self):
+        project = world_with_a_microcontinent()
+        project.terrane_max_km2 = 0.
+        history = History(project)
+        history.commit({1: EAST}, events=[TRENCH, dict(kind='keep_apart', plates=[1, 2])])
+        for _ in range(3):
+            history.commit({1: EAST})
+        self.assertIn('active', {b['kind'] for b in history.current.orogens})
+        welded = history.commit({1: EAST}, events=[dict(kind='weld', plates=[1, 2])])
+        kinds = {b['kind'] for b in welded.orogens}
+        self.assertIn('former', kinds)
+        self.assertNotIn('active', kinds)
+        with tempfile.TemporaryDirectory() as directory:
+            gplates.export(history, directory)
+            self.assertGreater(len(pygplates.FeatureCollection(os.path.join(directory, 'Former orogenies.gpml'))), 0)
+            self.assertGreater(len(pygplates.FeatureCollection(os.path.join(directory, 'Active orogenies.gpml'))), 0)
 
     def test_a_declared_weld_joins_two_plates_at_once(self):
         history = History(world_with_a_microcontinent())
