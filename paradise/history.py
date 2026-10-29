@@ -24,7 +24,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import spherely
 
+from paradise import events as declared
 from paradise.core import sphere
+from paradise.core.world import INITIATION_KM
 from paradise.paint import world_from_grid
 
 STEP_MYR = 10.
@@ -88,6 +90,7 @@ class Snapshot:
     frames: list          # [(time_myr, {plate: 3x3 frame})], one per sub-step, for the rotation file
     entries: list         # the core's ledger entry of each sub-step
     warnings: list = field(default_factory=list)
+    trenches: list = field(default_factory=list)   # paradise.events.trenches at the end of the step
 
 
 @dataclass
@@ -99,12 +102,16 @@ class Project:
     step_myr: float = STEP_MYR
     ocean_age_myr: float = 60.
     plate_names: dict = field(default_factory=dict)
-    steps: list = field(default_factory=list)   # [{'poles': {plate: [lat, lon, rate]}, 'note': str}]
+    # [{'poles': {plate: [lat, lon, rate]}, 'events': [declaration], 'note': str}]
+    steps: list = field(default_factory=list)
+    # Whether a converging boundary becomes a trench by itself once it has closed INITIATION_KM.
+    # Without it, every trench is declared (paradise.events).
+    auto_trenches: bool = True
 
     # ------------------------------------------------------------------ files
     def to_json(self) -> dict:
         return dict(format='paradise-project', version=1, name=self.name, start_age_ma=self.start_age_ma,
-                    step_myr=self.step_myr, ocean_age_myr=self.ocean_age_myr,
+                    step_myr=self.step_myr, ocean_age_myr=self.ocean_age_myr, auto_trenches=self.auto_trenches,
                     plate_names={str(k): v for k, v in self.plate_names.items()},
                     plates=encode_grid(self.plates), crust=encode_grid(self.crust), steps=self.steps)
 
@@ -115,7 +122,8 @@ class Project:
         return cls(data['name'], decode_grid(data['plates']), decode_grid(data['crust']),
                    float(data.get('start_age_ma', 2000.)), float(data.get('step_myr', STEP_MYR)),
                    float(data.get('ocean_age_myr', 60.)),
-                   {int(k): v for k, v in data.get('plate_names', {}).items()}, list(data.get('steps', [])))
+                   {int(k): v for k, v in data.get('plate_names', {}).items()}, list(data.get('steps', [])),
+                   bool(data.get('auto_trenches', True)))
 
     def save(self, path):
         with open(path, 'w', encoding='utf-8') as f:
@@ -131,7 +139,7 @@ class Project:
         return self.start_age_ma - time_myr
 
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 class History:
@@ -156,16 +164,17 @@ class History:
             if k < len(cached) and cached[k][0] == self._key(k) and len(self.snapshots) == k:
                 self.snapshots.append(cached[k][1])
             else:
-                self.snapshots.append(self._advance(self.snapshots[-1], step['poles']))
+                self.snapshots.append(self._advance(self.snapshots[-1], step['poles'], step.get('events', [])))
 
     def _key(self, k: int) -> str:
         """What snapshot `k` depends on: the painting, the settings and the first `k` steps."""
         p = self.project
         digest = hashlib.sha256()
-        digest.update(json.dumps([CACHE_VERSION, SUBSTEP_MYR, p.step_myr, p.ocean_age_myr, list(p.plates.shape)]).encode())
+        digest.update(json.dumps([CACHE_VERSION, SUBSTEP_MYR, p.step_myr, p.ocean_age_myr, p.auto_trenches,
+                                  list(p.plates.shape)]).encode())
         digest.update(np.ascontiguousarray(p.plates, np.int64).tobytes())
         digest.update(np.ascontiguousarray(p.crust, np.int64).tobytes())
-        digest.update(json.dumps([s['poles'] for s in p.steps[:k]], sort_keys=True).encode())
+        digest.update(json.dumps([[s['poles'], s.get('events', [])] for s in p.steps[:k]], sort_keys=True).encode())
         return digest.hexdigest()
 
     def _read_cache(self) -> list:
@@ -190,14 +199,18 @@ class History:
     def current(self) -> Snapshot:
         return self.snapshots[-1]
 
-    def preview(self, poles: dict) -> Snapshot:
-        """The next step with these poles, without adding it to the history."""
-        return self._advance(self.current, poles)
+    def preview(self, poles: dict, events: list = ()) -> Snapshot:
+        """The next step with these poles and declarations, without adding it to the history."""
+        return self._advance(self.current, poles, [declared.validate(e) for e in events])
 
-    def commit(self, poles: dict, note: str = '') -> Snapshot:
+    def commit(self, poles: dict, note: str = '', events: list = ()) -> Snapshot:
         poles = {int(p): [float(v) for v in pole] for p, pole in poles.items()}
-        snapshot = self._advance(self.current, poles)
-        self.project.steps.append(dict(poles={str(p): v for p, v in poles.items()}, note=note))
+        events = [declared.validate(e) for e in events]
+        snapshot = self._advance(self.current, poles, events)
+        step = dict(poles={str(p): v for p, v in poles.items()}, note=note)
+        if events:
+            step['events'] = events
+        self.project.steps.append(step)
         self.snapshots.append(snapshot)
         return snapshot
 
@@ -209,11 +222,14 @@ class History:
         del self.project.steps[step:]
 
     # ------------------------------------------------------------------ stepping
-    def _advance(self, before: Snapshot, poles: dict) -> Snapshot:
+    def _advance(self, before: Snapshot, poles: dict, events: list = ()) -> Snapshot:
         world = copy.deepcopy(before.world)
+        world.initiation_km = INITIATION_KM if self.project.auto_trenches else math.inf
         cratons = list(before.cratons)
         vectors = {int(p): pole_vector(*pole) for p, pole in poles.items()}
         frames, entries = [], []
+        # Declarations apply to the world as it was shown when they were made, before anything moves.
+        notes = declared.apply(world, events)
         # The new poles take effect now: type every boundary from them before the first sub-step, so
         # its opening is booked as ridge (not as a sliver of a boundary typed by the old motion).
         world._evolve({p: vectors.get(p, np.zeros(3)) for p in world.plates()}, 0., dict(continent_arrived=[]))
@@ -233,7 +249,8 @@ class History:
             frames.append((world.time_myr, _frames(world)))
             cratons = _rehome(cratons, world)
         snapshot = Snapshot(world.time_myr, world, cratons, frames, entries)
-        snapshot.warnings = review(world, vectors)
+        snapshot.trenches = declared.trenches(world, vectors, self.project.step_myr)
+        snapshot.warnings = notes + review(world, vectors) + declared.trench_warnings(snapshot.trenches, vectors)
         return snapshot
 
 

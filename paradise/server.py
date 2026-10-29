@@ -52,6 +52,7 @@ class App:
     def start(self) -> dict:
         p = self.history.project
         return dict(name=p.name, start_age_ma=p.start_age_ma, ocean_age_myr=p.ocean_age_myr,
+                    auto_trenches=p.auto_trenches,
                     width=int(p.plates.shape[1]), height=int(p.plates.shape[0]),
                     plates=base64.b64encode(p.plates.astype('<u2').tobytes()).decode('ascii'),
                     crust=base64.b64encode(p.crust.astype('<u2').tobytes()).decode('ascii'))
@@ -77,7 +78,7 @@ class App:
         steps = [dict(index=0, age_ma=project.age_ma(0.), note='Painted start')]
         for k, step in enumerate(project.steps, start=1):
             steps.append(dict(index=k, age_ma=project.age_ma(history.snapshots[k].time_myr),
-                              note=step.get('note', '')))
+                              note=step.get('note', ''), events=step.get('events', [])))
         continent = sum(c.area_km2() for c in world.crust if c.kind == 'continent')
         return dict(name=project.name, time_myr=snapshot.time_myr, age_ma=project.age_ma(snapshot.time_myr),
                     step_myr=project.step_myr, steps=steps, plates=plates,
@@ -85,7 +86,7 @@ class App:
                     map='data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii'),
                     plate_of=base64.b64encode(plate_of.astype('<u2').tobytes()).decode('ascii'),
                     map_width=MAP_WIDTH, lines=_lines(world, snapshot.cratons), warnings=snapshot.warnings,
-                    events=_events(snapshot))
+                    events=_events(snapshot), trenches=_trenches(snapshot), auto_trenches=project.auto_trenches)
 
     # ------------------------------------------------------------------ actions
     def build(self, body) -> dict:
@@ -94,7 +95,8 @@ class App:
         crust = _grid(body['crust'], height, width)
         project = Project(body.get('name') or 'Paradise', plates, crust,
                           start_age_ma=float(body.get('start_age_ma', 2000.)),
-                          ocean_age_myr=float(body.get('ocean_age_myr', 60.)))
+                          ocean_age_myr=float(body.get('ocean_age_myr', 60.)),
+                          auto_trenches=bool(body.get('auto_trenches', True)))
         self.history = History(project, self.cache)
         self.save()
         result = self.state()
@@ -102,12 +104,13 @@ class App:
         return result
 
     def preview(self, body) -> dict:
-        snapshot = self.history.preview(_poles(body))
+        snapshot = self.history.preview(_poles(body), body.get('events') or [])
         return dict(lines=_lines(snapshot.world, snapshot.cratons), warnings=snapshot.warnings, events=_events(snapshot),
+                    trenches=_trenches(snapshot),
                     message='Preview of %.0f Ma' % self.history.project.age_ma(snapshot.time_myr))
 
     def commit(self, body) -> dict:
-        self.history.commit(_poles(body), body.get('note', ''))
+        self.history.commit(_poles(body), body.get('note', ''), body.get('events') or [])
         self.save()
         result = self.state()
         result['message'] = 'Committed: now %.0f Ma' % result['age_ma']
@@ -157,13 +160,17 @@ def _lonlat(points) -> list:
     return [[round(float(a), 3), round(float(b), 3)] for a, b in zip(lon, lat)]
 
 
+def _trenches(snapshot) -> list:
+    return list(getattr(snapshot, 'trenches', []))
+
+
 def _lines(world, cratons=()) -> dict:
     """Boundaries by kind, plate and craton outlines, as lon/lat polylines for the browser to draw."""
     boundaries = []
     for b in world.boundaries:
         start = 0
         for k in range(1, len(b.kinds) + 1):
-            if k == len(b.kinds) or b.kinds[k] != b.kinds[start]:
+            if k == len(b.kinds) or (b.kinds[k], b.overriding[k]) != (b.kinds[start], b.overriding[start]):
                 boundaries.append(dict(kind=b.kinds[start], plates=[b.left, b.right],
                                        overriding=b.overriding[start], points=_lonlat(b.points[start:k + 1])))
                 start = k

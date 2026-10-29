@@ -138,6 +138,78 @@ class HistoryTests(unittest.TestCase):
             self.assertAlmostEqual(float(sphere.to_lonlat(moved)[1]), -2.5, delta=.2)
 
 
+def four_plates():
+    """Plates 1 (west) and 2 (east) meeting along 0 and 180 degrees, with polar caps 3 and 4."""
+    lon, lat = grid_lonlat()
+    plates = np.where(lon < 0., 1, 2)
+    plates[lat > 60.] = 3
+    plates[lat < -60.] = 4
+    return plates, np.zeros((H, W), np.int64)
+
+
+EAST = [90., 0., .5]           # plate 1 turns east about the north pole: closing on plate 2 along 0 degrees
+STRETCH = [[0., -50.], [0., 50.]]
+
+
+class DeclaredSubductionTests(unittest.TestCase):
+    def setUp(self):
+        self.project = Project('test', *four_plates(), start_age_ma=1000., auto_trenches=False)
+
+    def test_without_a_declaration_no_trench_forms(self):
+        snapshot = History(self.project).commit({1: EAST})
+        self.assertEqual(snapshot.trenches, [])
+        self.assertNotIn('trench', {k for b in snapshot.world.boundaries for k in b.kinds})
+        self.assertGreater(sum(e['lost']['compression'] for e in snapshot.entries), 1e6)
+
+    def test_a_declared_trench_consumes_the_plate_that_goes_under(self):
+        history = History(self.project)
+        snapshot = history.commit({1: EAST}, events=[dict(kind='subduction', plates=[2, 1], overriding=1,
+                                                         points=STRETCH)])
+        self.assertEqual(len(snapshot.trenches), 1)
+        trench = snapshot.trenches[0]
+        self.assertEqual((trench['overriding'], trench['downgoing']), (1, 2))
+        # 0.5 degrees/Myr about the pole is 5.6 cm/yr at the equator, less towards the junctions at 60 degrees.
+        self.assertGreater(trench['closing_cm_yr'], 3.)
+        self.assertLess(trench['closing_cm_yr'], 5.6)
+        self.assertAlmostEqual(trench['slab_age_myr'], 70., delta=1.)
+        subducted = sum(e['lost']['subducted'] for e in snapshot.entries)
+        self.assertGreater(subducted, .8 * trench['consumed_km2_per_step'])
+        self.assertLess(subducted, 1.2 * trench['consumed_km2_per_step'])
+        self.assertEqual(self.project.steps[0]['events'][0]['overriding'], 1)
+        # The trench lasts into the next step without being declared again, and replays the same.
+        again = history.commit({1: EAST})
+        self.assertEqual([(t['overriding'], t['downgoing']) for t in again.trenches], [(1, 2)])
+        replayed = History(Project.from_json(self.project.to_json()))
+        self.assertEqual([t['length_km'] for t in replayed.current.trenches], [t['length_km'] for t in again.trenches])
+
+    def test_declaring_again_flips_the_polarity_and_ending_stops_it(self):
+        history = History(self.project)
+        first = history.commit({1: EAST}, events=[dict(kind='subduction', plates=[1, 2], overriding=1, points=STRETCH)])
+        flipped = history.commit({1: EAST}, events=[dict(kind='subduction', plates=[1, 2], overriding=2,
+                                                        points=first.trenches[0]['points'])])
+        self.assertEqual([(t['overriding'], t['downgoing']) for t in flipped.trenches], [(2, 1)])
+        ended = history.commit({1: EAST}, events=[dict(kind='end_subduction', plates=[1, 2],
+                                                      points=flipped.trenches[0]['points'])])
+        self.assertEqual(ended.trenches, [])
+
+    def test_a_trench_whose_plates_pull_apart_is_reported(self):
+        history = History(self.project)
+        west = [90., 0., -.5]
+        snapshot = history.commit({1: west}, events=[dict(kind='subduction', plates=[1, 2], overriding=1, points=STRETCH)])
+        self.assertLess(snapshot.trenches[0]['closing_cm_yr'], 0.)
+        self.assertIn('trench_opening', {w['kind'] for w in snapshot.warnings})
+        self.assertGreater(sum(e['gained']['trench_opening'] for e in snapshot.entries), 1e6)
+
+    def test_bad_declarations_are_refused(self):
+        history = History(self.project)
+        with self.assertRaises(ValueError):
+            history.preview({}, [dict(kind='subduction', plates=[1, 2], overriding=3, points=STRETCH)])
+        with self.assertRaises(ValueError):
+            history.preview({}, [dict(kind='subduction', plates=[1, 1], overriding=1, points=STRETCH)])
+        missed = history.preview({}, [dict(kind='subduction', plates=[3, 4], overriding=3, points=STRETCH)])
+        self.assertIn('declaration_missed', {w['kind'] for w in missed.warnings})
+
+
 class ExportTests(unittest.TestCase):
     def test_gplates_reconstructs_what_the_model_shows(self):
         plates, crust = three_plates()
@@ -165,6 +237,27 @@ class ExportTests(unittest.TestCase):
                 self.assertAlmostEqual(got.get_area() * sphere.RADIUS_KM ** 2 / piece.area_km2(), 1., places=3)
             divergent = pygplates.FeatureCollection(os.path.join(directory, 'Divergent.gpml'))
             self.assertGreater(len(divergent), 0)
+
+    def test_a_declared_trench_exports_with_its_polarity(self):
+        project = Project('test', *four_plates(), start_age_ma=1000., auto_trenches=False)
+        history = History(project)
+        history.commit({1: EAST}, events=[dict(kind='subduction', plates=[1, 2], overriding=2, points=STRETCH)])
+        with tempfile.TemporaryDirectory() as directory:
+            gplates.export(history, directory)
+            trenches = [f for f in pygplates.FeatureCollection(os.path.join(directory, 'Convergent.gpml'))
+                        if f.get_feature_type() == pygplates.FeatureType.gpml_subduction_zone]
+            self.assertEqual(len(trenches), 1)
+            trench = trenches[0]
+            # Carried by the overriding plate, with the overriding plate on the side its polarity names.
+            self.assertEqual(trench.get_reconstruction_plate_id(), 2)
+            polarity = trench.get_enumeration(pygplates.PropertyName.gpml_subduction_polarity)
+            line = trench.get_geometry()
+            points = list(line.get_points())
+            middle = len(points) // 2
+            a, b = [np.array(p.to_xyz()) for p in points[middle:middle + 2]]   # away from the junctions
+            left_of_line = sphere.unit(sphere.unit(a + b) + .05 * sphere.unit(np.cross(a, b)))
+            lon, lat = sphere.to_lonlat(left_of_line)
+            self.assertEqual(polarity, 'Right' if float(lon) < 0. else 'Left')   # plate 2 lies east of 0
 
 
 if __name__ == '__main__':

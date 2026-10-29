@@ -67,6 +67,8 @@
       <input id="start-age" type="number" value="2000" step="10">
       <label for="ocean-age">Starting ocean age (Myr)</label>
       <input id="ocean-age" type="number" value="60" step="5">
+      <label class="check"><input id="auto-trenches" type="checkbox" checked> Trenches form by themselves once plates have converged 100 km</label>
+      <p class="hint">Turn this off to declare every trench yourself.</p>
       <button id="build" class="primary">Build world</button>
       <p class="hint">Building replaces the history with this painting.</p>
     </aside>
@@ -111,7 +113,39 @@
         <span class="key craton">Craton</span>
         <span class="key preview">Preview</span>
       </div>
-      <p class="hint">Click a plate to select its row. Shift-click the map to put the selected plate's pole there.</p>
+      <div class="row" role="radiogroup" aria-label="What a click on the map does">
+        <span class="hint">Clicking the map:</span>
+        <label><input type="radio" name="map-mode" value="plate" checked> selects a plate</label>
+        <label><input type="radio" name="map-mode" value="boundary"> picks a boundary</label>
+      </div>
+      <p class="hint" id="map-hint">Click a plate to select its row. Shift-click the map to put the selected plate's pole there.</p>
+
+      <div id="boundary-pick" class="card" hidden>
+        <p id="boundary-text"></p>
+        <div class="row">
+          <button id="subduct-left"></button>
+          <button id="subduct-right"></button>
+          <button id="end-subduction">End subduction</button>
+          <button id="pick-clear">Clear</button>
+        </div>
+      </div>
+
+      <div class="columns">
+        <div>
+          <h2>Declared for the next step</h2>
+          <ul id="declared"><li class="hint">Nothing declared. Pick a boundary on the map to declare a trench.</li></ul>
+        </div>
+        <div>
+          <h2>Trenches <span id="trench-mode" class="hint"></span></h2>
+          <div class="tablebox">
+            <table id="trenches">
+              <thead><tr><th>Plates</th><th>Over</th><th>Under</th><th>Length km</th><th>Closing cm/yr</th><th>Slab age Myr</th><th>Consumed Mkm² / step</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="hint">Click a trench to pick it, to flip it or end it.</p>
+        </div>
+      </div>
     </div>
   </section>
 </main>

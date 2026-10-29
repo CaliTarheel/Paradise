@@ -50,7 +50,9 @@ history when you open the project again; you can delete it at any time.
 2. **Crust.** Switch the layer to **Crust** and paint continents and cratons onto the plates.
    Everything not painted is ocean.
 3. **World.** Set the start age (the history counts down from it, as GPlates does) and the starting
-   ocean age, then **Build world**.
+   ocean age, then **Build world**. Clear **Trenches form by themselves** if you want to declare
+   every trench yourself. Otherwise a converging boundary also becomes a trench once it has closed
+   100 km, with continent overriding ocean and younger ocean overriding older.
 
 ## Step the history
 
@@ -69,6 +71,32 @@ drops every later step.
 The notes under the buttons report what happened in the step, such as trenches that formed and
 continents that collided.
 
+## Declare a trench
+
+1. Under the map, set **Clicking the map** to **picks a boundary**.
+2. Click a boundary. That picks the whole stretch of it between the same two plates and of one
+   type. To declare only part of it, click it a second time: the pick shrinks to the stretch
+   between your two clicks.
+3. Choose which plate goes under. The declaration appears under **Declared for the next step**,
+   drawn on the map with teeth on the overriding plate's side. You can remove it before
+   committing.
+4. **Preview** or **Commit step** as usual.
+
+A declared trench lasts as the plates move, consuming the plate that goes under, until you end it
+or a continent reaches it and it becomes a collision. To flip its polarity, pick it (on the map or
+in the **Trenches** table) and declare the other plate under. **End subduction** turns it back into
+an ordinary boundary, typed from the motion.
+
+The **Trenches** table measures every trench after each step:
+- its length;
+- how fast it closes, negative where the plates pull apart;
+- the age of the ocean going down;
+- the area it consumes per step at that rate.
+
+Warnings point out continent arriving at a trench, plates pulling away from their trench, and a
+long trench whose downgoing plate barely moves. Scotese's first rule of thumb: plates carried by
+a slab move fast.
+
 ## Export to GPlates
 
 **Export to GPlates** writes a folder beside the project file containing:
@@ -77,12 +105,19 @@ continents that collided.
   `.gpml` layers.
 
 Open them all in GPlates. Each step's features show from that step's age until the next step's.
-Edits made in GPlates do not come back into Paradise.
+Trenches are in `Convergent` as subduction zones, carried by the overriding plate, with
+the polarity GPlates reads as the overriding plate's side. Edits made in GPlates do not come back into Paradise.
 
 ## Limitations
 
-- **Trenches.** A converging boundary becomes a trench only after it has closed 100 km. You cannot
-  yet declare a trench, its polarity, or a rift yourself.
+- **Trenches.**
+  - A declaration applies to whole boundary segments within 60 km of the stretch you pick. Long
+    straight segments can make the declared trench a little longer than the pick.
+  - A stretch shorter than three segments takes the type of its neighbours; Paradise warns when
+    that happens.
+  - Where the plates pull apart across a trench, the new ocean is split between the two plates;
+    there is no back-arc spreading yet.
+- **Rifts.** You cannot declare a rift yet.
 - **Time resolution.** Sub-steps are a fixed 2.5 Myr, so a fast plate moves a few hundred
   kilometres per sub-step. A 10 Myr step takes about ten seconds for a dozen plates.
 - **Export.**

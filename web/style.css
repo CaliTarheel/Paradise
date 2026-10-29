@@ -53,4 +53,15 @@ td.fast { color: var(--ridge); font-weight: 600; }
 .key::before { content: ""; display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 5px; background: var(--c); }
 .key.ridge { --c: var(--ridge); } .key.trench { --c: var(--trench); } .key.transform { --c: var(--transform); }
 .key.converging { --c: var(--converging); } .key.collision { --c: var(--collision); } .key.preview { --c: #ffffff; } .key.craton { --c: #462d14; }
+.check { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; margin-top: 8px; }
+.card p { margin: 0 0 6px; }
+.columns { display: grid; grid-template-columns: 1fr 1.6fr; gap: 16px; margin-top: 4px; }
+.columns > div { min-width: 0; }
+.tablebox { overflow-x: auto; }
+#trenches tbody tr { cursor: pointer; }
+#trenches tbody tr:hover { background: #e7eef7; }
+#declared { margin: 0; padding-left: 18px; font-size: 12px; }
+#declared button { padding: 0 6px; font-size: 11px; margin-left: 6px; }
+@media (max-width: 1100px) { .columns { grid-template-columns: 1fr; } }
 @media (max-width: 800px) { .view { grid-template-columns: 1fr; } }

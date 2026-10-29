@@ -11,6 +11,10 @@ const stepper = {
   selected: null,
   mapImage: new Image(),
   plateOf: null,
+  // A picked stretch of boundary: the run it lies on, the vertex first clicked, and the stretch [i0, i1].
+  pick: null,
+  // Declarations for the next step, sent with Preview and Commit.
+  declared: [],
 
   async load() {
     const r = await fetch('/api/state');
@@ -27,9 +31,130 @@ const stepper = {
     this.mapImage.src = state.map;
     document.getElementById('clock').textContent =
       `${state.name}: ${fmt(state.age_ma)} Ma (step ${state.steps.length - 1})`;
+    this.pick = null;
+    this.declared = [];
     this.table();
     this.history();
     this.notes(state.warnings, state.events);
+    this.trenchTable(state.trenches);
+    this.declaredList();
+    this.pickPanel();
+  },
+
+  // `preview`: the trenches a preview would leave. They are not where the boundaries are now, so
+  // they cannot be picked.
+  trenchTable(trenches, preview) {
+    const body = document.querySelector('#trenches tbody');
+    document.getElementById('trench-mode').textContent = preview ? '(after the preview)'
+      : this.state.auto_trenches ? '(they also form by themselves)' : '(only declared ones)';
+    body.innerHTML = '';
+    for (const t of trenches || []) {
+      const tr = document.createElement('tr');
+      const cells = [`${t.plates[0]}–${t.plates[1]}`, t.overriding, t.downgoing, t.length_km.toLocaleString(),
+        t.closing_cm_yr.toFixed(1), t.slab_age_myr == null ? '—' : t.slab_age_myr.toFixed(0),
+        (t.consumed_km2_per_step / 1e6).toFixed(2)];
+      for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
+      if (t.closing_cm_yr < 0) tr.title = 'The plates pull apart across this trench.';
+      if (!preview) tr.addEventListener('click', () => {
+        const run = { kind: 'trench', plates: t.plates, overriding: t.overriding, points: t.points };
+        this.pick = { run, anchor: 0, i0: 0, i1: t.points.length - 1 };
+        this.pickPanel(); this.draw();
+      });
+      body.appendChild(tr);
+    }
+    if (!body.children.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="7" class="hint">No trenches yet.</td>';
+      body.appendChild(tr);
+    }
+  },
+
+  // Boundary picking: the first click picks a whole run, a second click on it keeps the stretch between.
+  pickAt(x, y) {
+    const canvas = document.getElementById('map');
+    const w = canvas.width, h = canvas.height;
+    let best = null;
+    for (const b of this.state.lines.boundaries) {
+      for (let i = 0; i < b.points.length; i++) {
+        const [px, py] = toCanvas(b.points[i], w, h);
+        const d = Math.hypot(px - x, py - y);
+        if (!best || d < best.d) best = { d, run: b, i };
+      }
+      for (let i = 0; i + 1 < b.points.length; i++) {
+        const [ax, ay] = toCanvas(b.points[i], w, h), [bx, by] = toCanvas(b.points[i + 1], w, h);
+        if (Math.abs(bx - ax) > w / 2) continue;
+        const d = segmentDistance(x, y, ax, ay, bx, by);
+        if (d < best.d) best = { d, run: b, i: Math.hypot(ax - x, ay - y) < Math.hypot(bx - x, by - y) ? i : i + 1 };
+      }
+    }
+    if (!best || best.d > 14) { this.pick = null; this.pickPanel(); this.draw(); return; }
+    if (this.pick && this.pick.run === best.run && this.pick.i0 === 0 && this.pick.i1 === best.run.points.length - 1
+        && best.i !== this.pick.anchor) {
+      this.pick.i0 = Math.min(this.pick.anchor, best.i);
+      this.pick.i1 = Math.max(this.pick.anchor, best.i);
+    } else {
+      this.pick = { run: best.run, anchor: best.i, i0: 0, i1: best.run.points.length - 1 };
+    }
+    this.pickPanel(); this.draw();
+  },
+
+  pickedPoints() {
+    const { run, i0, i1 } = this.pick;
+    const a = Math.max(0, i1 === i0 ? i0 - 1 : i0), b = Math.min(run.points.length - 1, i1 === i0 ? i1 + 1 : i1);
+    return run.points.slice(a, b + 1);
+  },
+
+  pickPanel() {
+    const panel = document.getElementById('boundary-pick');
+    if (!this.pick) { panel.hidden = true; return; }
+    panel.hidden = false;
+    const { run } = this.pick;
+    const [a, b] = run.plates;
+    const km = lengthKm(this.pickedPoints());
+    const whole = this.pick.i0 === 0 && this.pick.i1 === run.points.length - 1;
+    const state = run.kind === 'trench' ? `trench, plate ${run.overriding} over plate ${run.overriding === a ? b : a}` : run.kind;
+    document.getElementById('boundary-text').textContent =
+      `Boundary between plates ${a} and ${b} (${state}): ${Math.round(km).toLocaleString()} km picked. ` +
+      (whole ? 'Click this boundary again to keep only the stretch between your two clicks.' : 'Click elsewhere to pick again.');
+    const left = document.getElementById('subduct-left'), right = document.getElementById('subduct-right');
+    left.textContent = `Plate ${a} goes under plate ${b}`;
+    right.textContent = `Plate ${b} goes under plate ${a}`;
+    left.onclick = () => this.declare('subduction', b);
+    right.onclick = () => this.declare('subduction', a);
+    const end = document.getElementById('end-subduction');
+    end.hidden = run.kind !== 'trench';
+    end.onclick = () => this.declare('end_subduction');
+    document.getElementById('pick-clear').onclick = () => { this.pick = null; this.pickPanel(); this.draw(); };
+  },
+
+  declare(kind, overriding) {
+    const event = { kind, plates: this.pick.run.plates.slice(), points: this.pickedPoints() };
+    if (kind === 'subduction') event.overriding = overriding;
+    this.declared.push(event);
+    this.pick = null;
+    this.preview = null;
+    this.pickPanel(); this.declaredList(); this.trenchTable(this.state.trenches); this.draw();
+  },
+
+  declaredList() {
+    const list = document.getElementById('declared');
+    list.innerHTML = '';
+    if (!this.declared.length) {
+      list.innerHTML = '<li class="hint">Nothing declared. Pick a boundary on the map to declare a trench.</li>';
+      return;
+    }
+    this.declared.forEach((e, k) => {
+      const li = document.createElement('li');
+      li.textContent = describeDeclaration(e) + ` (${Math.round(lengthKm(e.points)).toLocaleString()} km)`;
+      const b = document.createElement('button');
+      b.textContent = 'Remove';
+      b.addEventListener('click', () => {
+        this.declared.splice(k, 1); this.preview = null;
+        this.declaredList(); this.trenchTable(this.state.trenches); this.draw();
+      });
+      li.appendChild(b);
+      list.appendChild(li);
+    });
   },
 
   table() {
@@ -92,7 +217,8 @@ const stepper = {
     list.innerHTML = '';
     for (const s of this.state.steps) {
       const li = document.createElement('li');
-      li.textContent = `${fmt(s.age_ma)} Ma ${s.note ? '— ' + s.note : ''} `;
+      const declared = (s.events || []).map(describeDeclaration).join('; ');
+      li.textContent = `${fmt(s.age_ma)} Ma ${s.note ? '— ' + s.note : ''}${declared ? ' [' + declared + ']' : ''} `;
       if (s.index < this.state.steps.length - 1) {
         const b = document.createElement('button');
         b.textContent = 'Go back here';
@@ -133,9 +259,26 @@ const stepper = {
       polyline(ctx, o.points, w, h, selected ? '#ffffff' : 'rgba(0,0,0,0.35)', selected ? 2.5 : 1);
     }
     for (const c of lines.cratons || []) polyline(ctx, c.points, w, h, 'rgba(70,45,20,0.9)', 1.5, [3, 3]);
-    for (const b of lines.boundaries) polyline(ctx, b.points, w, h, KIND_COLOURS[b.kind] || '#000', 2.5);
+    for (const b of lines.boundaries) {
+      polyline(ctx, b.points, w, h, KIND_COLOURS[b.kind] || '#000', 2.5);
+      if (b.kind === 'trench' && b.overriding != null) teeth(ctx, b.points, w, h, b.overriding === b.plates[0], KIND_COLOURS.trench);
+    }
     if (this.preview) {
       for (const o of this.preview.lines.outlines) polyline(ctx, o.points, w, h, 'rgba(255,255,255,0.9)', 1.5, [6, 4]);
+      for (const b of this.preview.lines.boundaries) {
+        if (b.kind === 'trench' && b.overriding != null) teeth(ctx, b.points, w, h, b.overriding === b.plates[0], 'rgba(255,255,255,0.9)');
+      }
+    }
+    // Declarations waiting for the next step: the stretch, with teeth on the side of the plate that will override.
+    for (const e of this.declared) {
+      polyline(ctx, e.points, w, h, 'rgba(255,255,255,0.95)', 6);
+      polyline(ctx, e.points, w, h, e.kind === 'subduction' ? KIND_COLOURS.trench : '#555', 3, [8, 5]);
+      if (e.kind === 'subduction') teeth(ctx, e.points, w, h, e.overriding === e.plates[0], KIND_COLOURS.trench, 11);
+    }
+    if (this.pick) {
+      polyline(ctx, this.pick.run.points, w, h, 'rgba(255,255,255,0.45)', 7);
+      polyline(ctx, this.pickedPoints(), w, h, '#ffffff', 7);
+      polyline(ctx, this.pickedPoints(), w, h, '#111111', 2);
     }
     // The selected plate's pole.
     if (this.selected != null) {
@@ -168,6 +311,58 @@ function describe(e) {
   }
 }
 
+function describeDeclaration(e) {
+  const [a, b] = e.plates;
+  if (e.kind === 'subduction') return `Trench: plate ${e.overriding === a ? b : a} goes under plate ${e.overriding}`;
+  if (e.kind === 'end_subduction') return `End the trench between plates ${a} and ${b}`;
+  return e.kind;
+}
+
+function toCanvas([lon, lat], w, h) { return [(lon + 180) / 360 * w, (90 - lat) / 180 * h]; }
+
+function segmentDistance(x, y, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+  const t = l2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+  return Math.hypot(x - ax - t * dx, y - ay - t * dy);
+}
+
+function lengthKm(points) {
+  let km = 0;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = unit(...points[i]), b = unit(...points[i + 1]);
+    km += 6371 * Math.acos(Math.max(-1, Math.min(1, dot(a, b))));
+  }
+  return km;
+}
+
+// Trench teeth on the side of the overriding plate. Walking the points, the boundary's first plate is
+// on the left; seen on the map (north up), left of a heading (dx, dy) in canvas pixels is (dy, -dx).
+function teeth(ctx, points, w, h, onLeft, colour, size) {
+  size = size || 8;
+  const spacing = 3 * size;
+  ctx.fillStyle = colour;
+  let carry = spacing / 2;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [ax, ay] = toCanvas(points[i], w, h), [bx, by] = toCanvas(points[i + 1], w, h);
+    if (Math.abs(bx - ax) > w / 2) continue;
+    const len = Math.hypot(bx - ax, by - ay);
+    if (!len) continue;
+    const ux = (bx - ax) / len, uy = (by - ay) / len;
+    const nx = onLeft ? uy : -uy, ny = onLeft ? -ux : ux;
+    let t = carry;
+    for (; t < len; t += spacing) {
+      const cx = ax + ux * t, cy = ay + uy * t;
+      ctx.beginPath();
+      ctx.moveTo(cx - ux * size * 0.6, cy - uy * size * 0.6);
+      ctx.lineTo(cx + ux * size * 0.6, cy + uy * size * 0.6);
+      ctx.lineTo(cx + nx * size, cy + ny * size);
+      ctx.closePath();
+      ctx.fill();
+    }
+    carry = t - len;   // how far into the next segment the next tooth goes
+  }
+}
+
 function polyline(ctx, points, w, h, colour, width, dash) {
   ctx.strokeStyle = colour; ctx.lineWidth = width; ctx.setLineDash(dash || []);
   ctx.beginPath();
@@ -188,10 +383,22 @@ function unit(lon, lat) {
 function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 function fmt(age) { return Math.round(age * 10) / 10; }
 
+function mapMode() { return document.querySelector('input[name=map-mode]:checked').value; }
+
+document.querySelectorAll('input[name=map-mode]').forEach((r) => r.addEventListener('change', () => {
+  document.getElementById('map-hint').textContent = mapMode() === 'boundary'
+    ? 'Click a boundary to pick it. Click it again to keep only the stretch between your two clicks.'
+    : "Click a plate to select its row. Shift-click the map to put the selected plate's pole there.";
+}));
+
 document.getElementById('map').addEventListener('click', (e) => {
   if (!stepper.state) return;
   const canvas = e.target, r = canvas.getBoundingClientRect();
   const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+  if (mapMode() === 'boundary' && !e.shiftKey) {
+    stepper.pickAt(fx * canvas.width, fy * canvas.height);
+    return;
+  }
   if (e.shiftKey && stepper.selected != null) {
     document.getElementById(`pole-${stepper.selected}-lat`).value = Math.round(90 - fy * 180);
     document.getElementById(`pole-${stepper.selected}-lon`).value = Math.round(fx * 360 - 180);
@@ -204,13 +411,16 @@ document.getElementById('map').addEventListener('click', (e) => {
 });
 
 document.getElementById('preview').addEventListener('click', async () => {
-  const result = await api('/api/preview', { poles: stepper.poles() }, 'Previewing the next step…');
-  if (result) { stepper.preview = result; stepper.draw(); stepper.notes(result.warnings, result.events); }
+  const result = await api('/api/preview', { poles: stepper.poles(), events: stepper.declared }, 'Previewing the next step…');
+  if (result) {
+    stepper.preview = result; stepper.draw();
+    stepper.notes(result.warnings, result.events); stepper.trenchTable(result.trenches, true);
+  }
 });
 
 document.getElementById('commit').addEventListener('click', async () => {
   const note = document.getElementById('note').value;
-  const result = await api('/api/commit', { poles: stepper.poles(), note }, 'Stepping 10 Myr…');
+  const result = await api('/api/commit', { poles: stepper.poles(), note, events: stepper.declared }, 'Stepping 10 Myr…');
   if (result) { document.getElementById('note').value = ''; stepper.show(result); }
 });
 

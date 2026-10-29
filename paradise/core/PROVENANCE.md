@@ -22,3 +22,6 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   first vertex. The fan from a vertex is degenerate when the loop passes through the point opposite
   it, which is what a plate painted from pole to pole does; such plates failed to rotate.
 - `render.draw` writes to a file object as well as a path.
+- `RegionWorld._initiate` reads the closing needed to start a trench from the world's
+  `initiation_km` attribute when it has one (default `INITIATION_KM`), so a project can leave every
+  trench to be declared.

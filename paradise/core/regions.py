@@ -890,7 +890,8 @@ class RegionWorld:
             if kinds[k] == kinds[start]:
                 continue
             run = range(start, k)
-            if kinds[start] == 'converging' and np.mean(b.closed_km[start:k]) >= INITIATION_KM:
+            # A world may set its own threshold (`initiation_km`): infinity leaves every trench to be declared.
+            if kinds[start] == 'converging' and np.mean(b.closed_km[start:k]) >= getattr(self, 'initiation_km', INITIATION_KM):
                 middle = (start + k) // 2
                 left, right = self._sides(b, middle)
                 if left == 'continent' and right == 'continent':

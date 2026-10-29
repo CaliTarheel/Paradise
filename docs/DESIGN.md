@@ -42,6 +42,34 @@ Boundary types follow the motion. A converging boundary becomes a trench once it
 with ocean going under continent and older ocean under younger; a trench a continent reaches becomes
 a collision, and a collision that has closed far enough welds the two plates.
 
+## Declared events
+
+A step can carry declarations as well as poles. Each declaration names two plates and a stretch of
+the boundary between them, as points picked on the map at the start of the step. It applies to
+every segment of that boundary within 60 km of the stretch. Replaying the log reaches the same world
+at the start of the step, so the same segments are found again.
+
+Declarations apply before anything moves, and before the boundaries are re-typed from the step's
+poles. The core never re-types a trench from the motion, and it carries each segment's type and
+overriding plate as the boundary moves. A declared trench therefore lasts until it is ended, or
+until a continent reaches it and it becomes a collision.
+
+- **Subduction** makes the segments a trench with the named plate overriding. Declaring it again
+  with the other plate over it flips the polarity.
+- **Ending subduction** makes the segments converging again, with their closing so far forgotten.
+  They are then typed from the motion.
+
+A project can turn off the core's own trench initiation, which otherwise makes a converging
+boundary a trench once it has closed 100 km. With it off, every trench is declared. A converging
+boundary with no trench is then resolved along its half-stage line, and the ocean lost there is
+booked as compression.
+
+Each step reports its trenches: length, closing rate, the age of the slab, and the area consumed
+per step. The warnings come from Scotese's rules of thumb:
+- a plate pulling away from its trench;
+- continent arriving at a trench;
+- a long trench whose downgoing plate barely moves, since plates carried by a slab move fast.
+
 ## The painted start
 
 The editor paints two equirectangular grids at 0.5 degrees: plate numbers, and crust (ocean,
@@ -66,8 +94,10 @@ GPlates is the viewer and the place for final polish. Nothing edited there comes
 
 1. **Done:** paint a start, step it with poles, go back, export to GPlates.
 2. Isochrons as lines, the plate hierarchy in the rotation file, and branching to a new project.
-3. Events a person declares: rift along a drawn line, start subduction with a chosen polarity,
-   polarity flip, trench jump, weld or keep apart, plume or LIP, calve a microcontinent.
+3. Events a person declares.
+   - **Done:** start subduction with a chosen polarity, flip it, end it.
+   - **To do:** rift along a drawn line, trench jump, weld or keep apart, plume or LIP, calve a
+     microcontinent, back-arc spreading.
 4. An advisor that proposes poles and events from the Scotese rules of thumb, and an autopilot that
    runs several steps and stops at any collision, rift, plate loss or warning.
 5. Secondary features: hotspot trails, LIPs, island arcs, back-arcs, accreted terranes, and
