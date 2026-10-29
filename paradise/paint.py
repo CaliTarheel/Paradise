@@ -25,6 +25,9 @@ from paradise.core.regions import FULL, RegionWorld
 from paradise.core.world import Crust
 
 OCEAN, CONTINENT, CRATON = 0, 1, 2
+# The longest edge simplification may leave, in cells. A declaration (a trench, say) applies to
+# whole boundary segments, so this is also how closely a declared stretch can be placed.
+EDGE_CELLS = 2.
 
 
 def cell_km(width: int) -> float:
@@ -161,7 +164,7 @@ def pieces_from_grid(plates: np.ndarray, kinds: np.ndarray, simplify_km2: float 
             flat.append(r)
             owner.append(n)
     if flat:
-        flat, _, _ = sphere.simplify_shared(flat, area_km2=simplify_km2, max_edge_km=4. * cell_km(width),
+        flat, _, _ = sphere.simplify_shared(flat, area_km2=simplify_km2, max_edge_km=EDGE_CELLS * cell_km(width),
                                             groups=owner)
     by_piece = defaultdict(list)
     for n, ring in zip(owner, flat):
@@ -216,7 +219,7 @@ def world_from_grid(plates: np.ndarray, crust: np.ndarray, ocean_age_myr: float 
                 if not rings:
                     continue
                 rings, _, _ = sphere.simplify_shared(rings, area_km2=1.2 * cell_km(plates.shape[1]) ** 2,
-                                                     max_edge_km=4. * cell_km(plates.shape[1]))
+                                                     max_edge_km=EDGE_CELLS * cell_km(plates.shape[1]))
                 region = sphere.polygon(rings[0])
                 for ring in rings[1:]:
                     region = sphere.intersection(region, sphere.polygon(ring))
