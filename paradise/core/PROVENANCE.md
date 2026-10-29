@@ -29,3 +29,5 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
 - `RegionWorld._initiate` reads the closing needed to start a trench from the world's
   `initiation_km` attribute when it has one (default `INITIATION_KM`), so a project can leave every
   trench to be declared.
+- `RegionWorld._sutures` leaves alone any pair of plates in the world's `kept_apart` set, when it
+  has one, so a person can let two plates collide without welding them.

@@ -92,6 +92,17 @@ class RiftTests(unittest.TestCase):
             self.assertEqual(len(rifts), 1)
             self.assertEqual(list(rifts)[0].get_feature_type(), pygplates.FeatureType.gpml_continental_rift)
 
+    def test_a_rift_welded_back_exports_as_failed(self):
+        history = History(self.project)
+        history.commit({}, events=[dict(kind='rift', plate=1, points=LINE, new_side='right', pole=AWAY)])
+        history.commit({}, events=[dict(kind='weld', plates=[1, 5])])
+        with tempfile.TemporaryDirectory() as directory:
+            gplates.export(history, directory)
+            failed = pygplates.FeatureCollection(os.path.join(directory, 'Failed rifts.gpml'))
+            active = pygplates.FeatureCollection(os.path.join(directory, 'Rifts.gpml'))
+            self.assertEqual(len(failed), 1)   # the last step, after the weld
+            self.assertEqual(len(active), 1)   # the step it opened
+
 
 class BackArcTests(unittest.TestCase):
     def test_a_backarc_rolls_back_and_opens_ocean_on_the_overriding_side(self):

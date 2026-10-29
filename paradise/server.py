@@ -30,6 +30,7 @@ import numpy as np
 from paradise import gplates
 from paradise.core import render, sphere
 from paradise.history import History, Project
+from paradise.terranes import TERRANE_MAX_KM2
 
 WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web')
 MAP_WIDTH = 720
@@ -52,7 +53,7 @@ class App:
     def start(self) -> dict:
         p = self.history.project
         return dict(name=p.name, start_age_ma=p.start_age_ma, ocean_age_myr=p.ocean_age_myr,
-                    auto_trenches=p.auto_trenches,
+                    auto_trenches=p.auto_trenches, terrane_max_km2=p.terrane_max_km2,
                     width=int(p.plates.shape[1]), height=int(p.plates.shape[0]),
                     plates=base64.b64encode(p.plates.astype('<u2').tobytes()).decode('ascii'),
                     crust=base64.b64encode(p.crust.astype('<u2').tobytes()).decode('ascii'))
@@ -87,7 +88,8 @@ class App:
                     plate_of=base64.b64encode(plate_of.astype('<u2').tobytes()).decode('ascii'),
                     map_width=MAP_WIDTH, lines=_lines(world, snapshot.cratons, snapshot.features), warnings=snapshot.warnings,
                     events=_events(snapshot), trenches=_trenches(snapshot), auto_trenches=project.auto_trenches,
-                    features=_features(snapshot, project))
+                    features=_features(snapshot, project), collisions=list(getattr(snapshot, 'collisions', [])),
+                    kept_apart=sorted(sorted(pair) for pair in getattr(world, 'kept_apart', ())))
 
     # ------------------------------------------------------------------ actions
     def build(self, body) -> dict:
@@ -97,7 +99,8 @@ class App:
         project = Project(body.get('name') or 'Paradise', plates, crust,
                           start_age_ma=float(body.get('start_age_ma', 2000.)),
                           ocean_age_myr=float(body.get('ocean_age_myr', 60.)),
-                          auto_trenches=bool(body.get('auto_trenches', True)))
+                          auto_trenches=bool(body.get('auto_trenches', True)),
+                          terrane_max_km2=float(body.get('terrane_max_km2', TERRANE_MAX_KM2)))
         self.history = History(project, self.cache)
         self.save()
         result = self.state()

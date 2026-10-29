@@ -146,6 +146,12 @@ const stepper = {
     const backarc = document.getElementById('open-backarc');
     backarc.hidden = run.kind !== 'trench';
     backarc.onclick = () => this.declare('backarc', run.overriding);
+    const kept = (this.state.kept_apart || []).some(([x, y]) => x === a && y === b);
+    document.getElementById('keep-apart').hidden = kept;
+    document.getElementById('allow-weld').hidden = !kept;
+    document.getElementById('weld').onclick = () => this.declarePair('weld');
+    document.getElementById('keep-apart').onclick = () => this.declarePair('keep_apart');
+    document.getElementById('allow-weld').onclick = () => this.declarePair('allow_weld');
     this.newPolePanel();
     document.getElementById('pick-clear').onclick = () => { this.pick = null; this.pickPanel(); this.draw(); };
   },
@@ -195,6 +201,13 @@ const stepper = {
     this.riftPanel(); this.declaredList(); this.trenchTable(this.state.trenches); this.draw();
   },
 
+  declarePair(kind) {
+    this.declared.push({ kind, plates: this.pick.run.plates.slice() });
+    this.pick = null;
+    this.preview = null;
+    this.pickPanel(); this.declaredList(); this.trenchTable(this.state.trenches); this.draw();
+  },
+
   declare(kind, overriding) {
     const event = { kind, plates: this.pick.run.plates.slice(), points: this.pickedPoints() };
     if (kind === 'subduction' || kind === 'backarc') event.overriding = overriding;
@@ -214,7 +227,7 @@ const stepper = {
     }
     this.declared.forEach((e, k) => {
       const li = document.createElement('li');
-      li.textContent = describeDeclaration(e) + ` (${Math.round(lengthKm(e.points)).toLocaleString()} km)`;
+      li.textContent = describeDeclaration(e) + (e.points ? ` (${Math.round(lengthKm(e.points)).toLocaleString()} km)` : '');
       const b = document.createElement('button');
       b.textContent = 'Remove';
       b.addEventListener('click', () => {
@@ -348,7 +361,7 @@ const stepper = {
       for (const p of line) { const [x, y] = toCanvas(p, w, h); ctx.fillStyle = '#fff'; ctx.fillRect(x - 3, y - 3, 6, 6); }
     }
     // Declarations waiting for the next step: the stretch, with teeth on the side of the plate that will override.
-    for (const e of this.declared.filter((e) => e.kind !== 'rift')) {
+    for (const e of this.declared.filter((e) => e.kind !== 'rift' && e.points)) {
       polyline(ctx, e.points, w, h, 'rgba(255,255,255,0.95)', 6);
       polyline(ctx, e.points, w, h, e.kind === 'subduction' ? KIND_COLOURS.trench : '#555', 3, [8, 5]);
       if (e.kind === 'subduction') teeth(ctx, e.points, w, h, e.overriding === e.plates[0], KIND_COLOURS.trench, 11);
@@ -400,6 +413,9 @@ function describeDeclaration(e) {
   if (e.kind === 'backarc') return `Back-arc behind the trench between plates ${a} and ${b}, on plate ${e.overriding}${pole}`;
   if (e.kind === 'subduction') return `Trench: plate ${e.overriding === a ? b : a} goes under plate ${e.overriding}`;
   if (e.kind === 'end_subduction') return `End the trench between plates ${a} and ${b}`;
+  if (e.kind === 'weld') return `Weld plates ${a} and ${b} into one`;
+  if (e.kind === 'keep_apart') return `Keep plates ${a} and ${b} apart when they collide`;
+  if (e.kind === 'allow_weld') return `Let plates ${a} and ${b} weld when they collide`;
   return e.kind;
 }
 

@@ -95,6 +95,7 @@ class Snapshot:
     features: list = field(default_factory=list)   # paradise.terranes.Feature: arcs and terranes
     rifts: list = field(default_factory=list)      # paradise.rifting: lines plates were split along
     new_poles: dict = field(default_factory=dict)  # plate made this step -> the pole it was given
+    collisions: list = field(default_factory=list)  # paradise.events.collisions at the end of the step
 
 
 @dataclass
@@ -111,11 +112,14 @@ class Project:
     # Whether a converging boundary becomes a trench by itself once it has closed INITIATION_KM.
     # Without it, every trench is declared (paradise.events).
     auto_trenches: bool = True
+    # The largest continental piece that accretes as a terrane instead of colliding (0: none do).
+    terrane_max_km2: float = terranes.TERRANE_MAX_KM2
 
     # ------------------------------------------------------------------ files
     def to_json(self) -> dict:
         return dict(format='paradise-project', version=1, name=self.name, start_age_ma=self.start_age_ma,
                     step_myr=self.step_myr, ocean_age_myr=self.ocean_age_myr, auto_trenches=self.auto_trenches,
+                    terrane_max_km2=self.terrane_max_km2,
                     plate_names={str(k): v for k, v in self.plate_names.items()},
                     plates=encode_grid(self.plates), crust=encode_grid(self.crust), steps=self.steps)
 
@@ -127,7 +131,8 @@ class Project:
                    float(data.get('start_age_ma', 2000.)), float(data.get('step_myr', STEP_MYR)),
                    float(data.get('ocean_age_myr', 60.)),
                    {int(k): v for k, v in data.get('plate_names', {}).items()}, list(data.get('steps', [])),
-                   bool(data.get('auto_trenches', True)))
+                   bool(data.get('auto_trenches', True)),
+                   float(data.get('terrane_max_km2', terranes.TERRANE_MAX_KM2)))
 
     def save(self, path):
         with open(path, 'w', encoding='utf-8') as f:
@@ -143,7 +148,7 @@ class Project:
         return self.start_age_ma - time_myr
 
 
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 
 class History:
@@ -174,7 +179,7 @@ class History:
         """What snapshot `k` depends on: the painting, the settings and the first `k` steps."""
         p = self.project
         digest = hashlib.sha256()
-        digest.update(json.dumps([CACHE_VERSION, SUBSTEP_MYR, p.step_myr, p.ocean_age_myr, p.auto_trenches,
+        digest.update(json.dumps([CACHE_VERSION, SUBSTEP_MYR, p.step_myr, p.ocean_age_myr, p.auto_trenches, p.terrane_max_km2,
                                   list(p.plates.shape)]).encode())
         digest.update(np.ascontiguousarray(p.plates, np.int64).tobytes())
         digest.update(np.ascontiguousarray(p.crust, np.int64).tobytes())
@@ -229,6 +234,7 @@ class History:
     def _advance(self, before: Snapshot, poles: dict, events: list = ()) -> Snapshot:
         world = copy.deepcopy(before.world)
         world.initiation_km = INITIATION_KM if self.project.auto_trenches else math.inf
+        world.terrane_max_km2 = self.project.terrane_max_km2
         cratons = list(before.cratons)
         features = copy.deepcopy(before.features)
         vectors = {int(p): pole_vector(*pole) for p, pole in poles.items()}
@@ -252,7 +258,8 @@ class History:
             split.append(record)
         # The new poles take effect now: type every boundary from them before the first sub-step, so
         # its opening is booked as ridge (not as a sliver of a boundary typed by the old motion).
-        world._evolve(_rotations(world, vectors), 0., dict(continent_arrived=[]))
+        # Its events (a declared weld happens here) are the step's first.
+        split += world._evolve(_rotations(world, vectors), 0., dict(continent_arrived=[]))
         remaining = self.project.step_myr
         while remaining > 1e-9:
             rotations = _rotations(world, vectors)
@@ -268,7 +275,8 @@ class History:
             cratons = _rehome(cratons, world)
         moving = _rotations(world, vectors)
         trenches = declared.trenches(world, moving, self.project.step_myr)
-        born = terranes.grow_arcs(world, trenches, before.trenches, features, world.time_myr)
+        born = terranes.grow_arcs(world, trenches, before.trenches, features, world.time_myr,
+                                 self.project.step_myr)
         if born:
             entries[-1]['events'] = entries[-1].get('events', []) + born
         snapshot = Snapshot(world.time_myr, world, cratons, frames, entries)
@@ -276,9 +284,15 @@ class History:
         snapshot.rifts = rifts
         snapshot.new_poles = new_poles
         if split:
-            entries[0]['events'] = split + entries[0].get('events', [])
+            entries[0]['events'] = _compact(dict(events=split))['events'] + entries[0].get('events', [])
         snapshot.trenches = trenches
-        snapshot.warnings = notes + review(world, moving) + declared.trench_warnings(snapshot.trenches, moving)
+        snapshot.collisions = declared.collisions(world)
+        kept = [dict(kind='kept_apart', plates=c['plates'], text=(
+            'Plates %d and %d collide along %d km but are kept apart; the continent between them goes '
+            'on shortening and thickening.' % (c['plates'][0], c['plates'][1], c['length_km'])))
+            for c in snapshot.collisions if c['kept_apart']]
+        snapshot.warnings = (notes + review(world, moving) + declared.trench_warnings(snapshot.trenches, moving)
+                             + kept)
         return snapshot
 
 

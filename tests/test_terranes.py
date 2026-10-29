@@ -46,6 +46,17 @@ class ArcTests(unittest.TestCase):
         self.assertAlmostEqual(offset_km, terranes.ARC_OFFSET_KM, delta=60.)
         self.assertIn('arc_born', {e['kind'] for e in second.entries[-1]['events']})
 
+    def test_an_arc_still_fed_by_its_trench_matures(self):
+        history = History(world_with_a_microcontinent(radius_km=0.))   # no microcontinent
+        history.commit({1: EAST}, events=[TRENCH])
+        history.commit({1: EAST})
+        young = [c.thickness_km for c in history.current.world.crust if c.kind == 'continent']
+        history.commit({1: EAST})
+        older = [c.thickness_km for c in history.current.world.crust if c.kind == 'continent']
+        self.assertEqual(min(young), terranes.ARC_THICKNESS_KM)
+        self.assertGreater(max(older), terranes.ARC_THICKNESS_KM)
+        self.assertLessEqual(max(older), terranes.ARC_MATURE_KM)
+
     def test_the_offset_line_lies_on_the_side_asked(self):
         line = sphere.from_lonlat(np.zeros(5), np.linspace(-20., 20., 5))   # northwards along 0 degrees
         left = terranes.offset_line(line, 100., to_left=True)
@@ -112,6 +123,45 @@ class TerraneTests(unittest.TestCase):
             self.assertTrue(all(f.get_feature_type() == pygplates.FeatureType.gpml_island_arc for f in arcs))
             description = list(accreted)[0].get_description()
             self.assertIn('accreted from plate 1 to plate 2', description)
+
+
+
+class CollisionTests(unittest.TestCase):
+    """With no terranes allowed, the microcontinent collides, and the plates weld unless kept apart."""
+
+    def run_until_collided(self, events=()):
+        project = world_with_a_microcontinent()
+        project.terrane_max_km2 = 0.
+        history = History(project)
+        history.commit({1: EAST}, events=[TRENCH] + list(events))
+        kinds = set()
+        for _ in range(4):
+            snapshot = history.commit({1: EAST})
+            kinds |= {e['kind'] for entry in snapshot.entries for e in entry.get('events', [])}
+        return history, kinds
+
+    def test_with_no_terranes_allowed_it_collides_and_the_plates_weld(self):
+        history, kinds = self.run_until_collided()
+        self.assertNotIn('accreted', kinds)
+        self.assertIn('collision', kinds)
+        self.assertIn('suture', kinds)
+        self.assertEqual(len({1, 2} & set(history.current.world.plates())), 1)
+
+    def test_plates_kept_apart_collide_without_welding(self):
+        history, kinds = self.run_until_collided([dict(kind='keep_apart', plates=[1, 2])])
+        self.assertIn('collision', kinds)
+        self.assertNotIn('suture', kinds)
+        self.assertTrue({1, 2} <= set(history.current.world.plates()))
+        self.assertIn('kept_apart', {w['kind'] for w in history.current.warnings})
+        self.assertTrue(history.current.collisions[0]['kept_apart'])
+
+    def test_a_declared_weld_joins_two_plates_at_once(self):
+        history = History(world_with_a_microcontinent())
+        snapshot = history.commit({}, events=[dict(kind='weld', plates=[1, 3])])
+        plates = set(snapshot.world.plates())
+        self.assertEqual(len(plates), 3)
+        self.assertEqual(len(plates & {1, 3}), 1)
+        self.assertIn('suture', {e['kind'] for entry in snapshot.entries for e in entry.get('events', [])})
 
 
 if __name__ == '__main__':

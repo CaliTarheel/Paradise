@@ -860,6 +860,9 @@ class RegionWorld:
                 left, right = into.get(b.left, b.left), into.get(b.right, b.right)
                 if left == right or left not in self.regions or right not in self.regions:
                     continue
+                # A world may name pairs of plates that collide without ever welding (`kept_apart`).
+                if frozenset((left, right)) in getattr(self, 'kept_apart', ()):
+                    continue
                 keep, gone = sorted((left, right), key=lambda p: -sphere.area_km2(self.regions[p]))
                 area = sphere.area_km2(self.regions[gone])
                 sutures = getattr(self, 'sutures', [])

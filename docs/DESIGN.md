@@ -64,6 +64,13 @@ boundary a trench once it has closed 100 km. With it off, every trench is declar
 boundary with no trench is then resolved along its half-stage line, and the ocean lost there is
 booked as compression.
 
+Three more declarations decide whether colliding plates become one. Left to the core, a collision
+that has closed 100 km welds its two plates.
+- **Weld** makes every segment between the two plates a collision closed that far, so the core
+  welds them in the re-typing before anything moves.
+- **Keep apart** adds the pair to the world's `kept_apart` set, which the core's welding skips. It
+  lasts until **allow weld** removes it.
+
 Each step reports its trenches: length, closing rate, the age of the slab, and the area consumed
 per step. The warnings come from Scotese's rules of thumb:
 - a plate pulling away from its trench;
@@ -98,11 +105,14 @@ overriding plate.
 - The band's ocean becomes continental crust 25 km thick: an island arc.
 - Its continent is recorded as a continental arc, adding no crust.
 
+Arc crust that the band still covers thickens 0.2 km per Myr, up to 35 km, as an arc matures.
+
 Requiring the trench to have lasted a step stands in for the few million years a slab takes to
 reach the depth where arc magmatism starts. The arc is on the overriding plate, so it stays behind
 when its trench moves away (Scotese: arcs do not ride their trenches across oceans).
 
-**Terranes.** Before each sub-step, any continental piece of at most 1 million km² that will reach,
+**Terranes.** Before each sub-step, any continental piece of at most the project's terrane size
+(1 million km² unless changed) that will reach,
 within that sub-step's motion plus 50 km, a trench its plate goes down is given to the overriding
 plate. The ocean around it, out to the trench, goes with it.
 - The handover happens before the core moves anything. Otherwise the core would turn the trench

@@ -132,7 +132,7 @@ def _windows(history):
 def layers(history) -> dict:
     """{layer file name: [features]} for the whole history."""
     out = {name: [] for name in ('Plates', 'Continents', 'Cratons', 'Island arcs', 'Continental arcs',
-                                 'Accreted terranes', 'Rifts', 'Ocean crust', 'Divergent', 'Convergent',
+                                 'Accreted terranes', 'Rifts', 'Failed rifts', 'Ocean crust', 'Divergent', 'Convergent',
                                  'Transform')}
     for k, snapshot, begin, end in _windows(history):
         world = snapshot.world
@@ -158,7 +158,9 @@ def layers(history) -> dict:
         for r in getattr(snapshot, 'rifts', []):
             # The line the plate was split along, carried by the plate it was drawn on.
             geometry = pygplates.PolylineOnSphere(_points_on_sphere(r['points']))
-            out['Rifts'].append(_feature('ContinentalRift', geometry, '%s into plate %d' % (r['kind'].lower(), r['new']),
+            # A rift whose two sides are one plate again (welded back) failed.
+            failed = r['plate'] not in world.regions or r['new'] not in world.regions
+            out['Failed rifts' if failed else 'Rifts'].append(_feature('ContinentalRift', geometry, '%s into plate %d' % (r['kind'].lower(), r['new']),
                                          r['plate'], begin, end,
                                          'split plate %d at %.0f Ma' % (r['new'], history.project.age_ma(r['time_myr']))))
         for f in getattr(snapshot, 'features', []):

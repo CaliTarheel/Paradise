@@ -18,6 +18,14 @@ Two more declarations split a plate (paradise.rifting), and may give the new pla
   as drawn) becomes a new plate.
 - `backarc`: behind a stretch of trench, the band of the overriding plate out to the arc and a
   little beyond becomes a new plate, which can roll back towards the trench.
+
+And three decide whether two plates that collide become one (the core welds them once their
+collision has closed SUTURE_KM):
+
+- `weld`: weld them now, whatever their boundary: every segment between them becomes a collision
+  closed SUTURE_KM, and the core welds them before anything moves.
+- `keep_apart`: never weld them, from this step on; they go on colliding.
+- `allow_weld`: undo `keep_apart`.
 """
 from __future__ import annotations
 
@@ -25,10 +33,12 @@ import numpy as np
 
 from paradise.core import sphere
 from paradise.core.build import MINIMUM_RUN, densify
+from paradise.core.regions import SUTURE_KM
 from paradise.core.topology import segment_motion
 
 REACH_KM = 60.
-KINDS = ('subduction', 'end_subduction', 'rift', 'backarc')
+KINDS = ('subduction', 'end_subduction', 'rift', 'backarc', 'weld', 'keep_apart', 'allow_weld')
+PAIRS = ('weld', 'keep_apart', 'allow_weld')   # declarations about two plates, not a stretch
 SPLITS = ('rift', 'backarc')
 # A plate carried by a slab moves fast (Scotese's first rule of thumb): below this at its trench,
 # the downgoing plate's motion is worth a second look.
@@ -60,6 +70,8 @@ def validate(event: dict) -> dict:
     plates = [int(p) for p in event.get('plates', [])]
     if len(plates) != 2 or plates[0] == plates[1]:
         raise ValueError('a %s names two different plates' % kind.replace('_', ' '))
+    if kind in PAIRS:
+        return dict(kind=kind, plates=sorted(plates))
     points = [[float(lon), float(lat)] for lon, lat in event.get('points', [])]
     if len(points) < 2:
         raise ValueError('a %s needs a stretch of boundary (two points or more)' % kind.replace('_', ' '))
@@ -81,6 +93,9 @@ def apply(world, events: list) -> list:
         event = validate(event)
         if event['kind'] in SPLITS:
             continue   # paradise.rifting, applied by the history
+        if event['kind'] in PAIRS:
+            notes += _pair(world, event)
+            continue
         left, right = event['plates']
         line = sphere.from_lonlat(*np.array(event['points']).T)
         dense = densify(line, spacing_km=REACH_KM / 3.)
@@ -107,6 +122,44 @@ def apply(world, events: list) -> list:
                               text='The declared %s between plates %d and %d found no boundary there any more.'
                                    % (event['kind'].replace('_', ' '), left, right)))
     return notes
+
+
+def _pair(world, event) -> list:
+    pair = frozenset(event['plates'])
+    kept = set(getattr(world, 'kept_apart', ()))
+    if event['kind'] == 'keep_apart':
+        world.kept_apart = kept | {pair}
+        return []
+    world.kept_apart = kept - {pair}
+    if event['kind'] == 'allow_weld':
+        return []
+    left, right = event['plates']
+    found = False
+    for b in world.boundaries:
+        if (b.left, b.right) == (left, right):
+            b.kinds = ['collision'] * len(b.kinds)
+            b.overriding = [None] * len(b.kinds)
+            b.closed_km = np.full(len(b.kinds), SUTURE_KM)
+            found = found or len(b.kinds) > 0
+    if not found:
+        return [dict(kind='declaration_missed', plates=[left, right],
+                     text='Plates %d and %d do not touch, so they cannot be welded.' % (left, right))]
+    return []
+
+
+def collisions(world) -> list:
+    """Pairs of plates colliding now: [{plates, length_km, kept_apart}]."""
+    kept = getattr(world, 'kept_apart', set())
+    found = {}
+    for b in world.boundaries:
+        if len(b.points) < 2:
+            continue
+        lengths = sphere.arc_km(b.points[:-1], b.points[1:])
+        km = float(sum(l for k, l in zip(b.kinds, lengths) if k == 'collision'))
+        if km > 0.:
+            found[(b.left, b.right)] = found.get((b.left, b.right), 0.) + km
+    return [dict(plates=list(pair), length_km=round(km), kept_apart=frozenset(pair) in kept)
+            for pair, km in sorted(found.items())]
 
 
 def trenches(world, vectors: dict, step_myr: float) -> list:

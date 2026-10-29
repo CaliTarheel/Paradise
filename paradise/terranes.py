@@ -32,6 +32,8 @@ from paradise.core.world import Crust
 ARC_OFFSET_KM = 150.         # trench to volcanic front, as in most arcs (about 100 to 200 km)
 ARC_HALF_WIDTH_KM = 30.
 ARC_THICKNESS_KM = 25.       # juvenile arc crust, thinner than mature continent
+ARC_GROWTH_KM_PER_MYR = .2   # an arc still fed by its trench thickens towards mature crust
+ARC_MATURE_KM = 35.
 ARC_MIN_CLOSING_CM_YR = 1.
 ARC_MIN_KM2 = 1000.          # an arc smaller than this is not worth keeping
 TERRANE_MAX_KM2 = 1e6        # about Japan and Kamchatka together; anything larger collides
@@ -96,7 +98,7 @@ def _trench_runs(world):
 
 
 # --------------------------------------------------------------------------------------------- arcs
-def grow_arcs(world, trenches: list, before: list, features: list, time_myr: float) -> list:
+def grow_arcs(world, trenches: list, before: list, features: list, time_myr: float, step_myr: float = 10.) -> list:
     """Add this step's arcs to `world` and `features`; returns events for arcs that are new.
 
     `trenches` are the step's trench records (paradise.events.trenches) and `before` the previous
@@ -135,6 +137,11 @@ def grow_arcs(world, trenches: list, before: list, features: list, time_myr: flo
                 new_arc.append(inside)
             else:
                 on_continent.append(inside)
+                if c.thickness_km < ARC_MATURE_KM and _is_arc(features, over, c.shape):
+                    # Arc crust still fed by its trench matures; its thickness mesh is built again
+                    # from the new mean.
+                    c.thickness_km = min(ARC_MATURE_KM, c.thickness_km + ARC_GROWTH_KM_PER_MYR * step_myr)
+                    c.mesh = None
             kept.append(c)
         world.crust = [c for c in kept if sphere.area_km2(c.shape) >= sphere.DETAIL_KM2]
         pair = '%d and %d' % tuple(t['plates'])
@@ -158,6 +165,13 @@ def grow_arcs(world, trenches: list, before: list, features: list, time_myr: flo
                 features.append(Feature(_next_ident(features), 'continental_arc', over, shape, time_myr,
                                         'continental arc of the trench between plates %s' % pair))
     return events
+
+
+def _is_arc(features, plate, shape) -> bool:
+    """Whether most of a crust piece is an island arc of this plate."""
+    area = sphere.area_km2(shape)
+    arcs = [f.shape for f in features if f.plate == plate and f.kind == 'island_arc']
+    return bool(arcs) and area > 0. and sphere.area_km2(sphere.intersection(shape, sphere.union(*arcs))) > .5 * area
 
 
 def _merge_into(features, kind, plate, shape):
@@ -200,9 +214,10 @@ def _next_accretion(world, rotations, dt):
                 parts, _ = sphere.parts(sphere.rotate_geography(c.shape, frame, tolerance=1e-4))
             except (ValueError, RuntimeError):
                 continue
+            largest = getattr(world, 'terrane_max_km2', TERRANE_MAX_KM2)   # a project's own limit
             for part in parts:
                 area = sphere.area_km2(part)
-                if area <= TERRANE_MAX_KM2 and area >= sphere.DETAIL_KM2:
+                if area <= largest and area >= sphere.DETAIL_KM2:
                     distance = _distance_km(part, line)
                     if distance <= reach:
                         others = [p for p in parts if p is not part]

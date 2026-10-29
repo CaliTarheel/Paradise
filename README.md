@@ -52,7 +52,9 @@ history when you open the project again; you can delete it at any time.
 3. **World.** Set the start age (the history counts down from it, as GPlates does) and the starting
    ocean age, then **Build world**. Clear **Trenches form by themselves** if you want to declare
    every trench yourself. Otherwise a converging boundary also becomes a trench once it has closed
-   100 km, with continent overriding ocean and younger ocean overriding older.
+   100 km, with continent overriding ocean and younger ocean overriding older. **Largest terrane
+   that accretes** sets the size above which continent reaching a trench collides instead (0: it
+   always collides).
 
 ## Step the history
 
@@ -97,6 +99,15 @@ Warnings point out continent arriving at a trench, plates pulling away from thei
 long trench whose downgoing plate barely moves. Scotese's first rule of thumb: plates carried by
 a slab move fast.
 
+## Weld two plates, or keep them apart
+
+When continents collide, the two plates weld into one once the collision has closed 100 km. To
+decide that yourself, pick the boundary between them:
+- **Weld these plates now** joins them at the start of the step, whatever their boundary.
+- **Keep these plates apart** lets them collide without welding, from this step on. The continent
+  between them goes on shortening and thickening, and a warning says so each step.
+- **Let them weld** undoes that.
+
 ## Rift a plate, or open a back-arc
 
 **Rifts.**
@@ -127,10 +138,13 @@ These follow from the trenches; there is nothing to declare.
   - Over ocean the arc is new, thin crust: an island arc.
   - Over continent it is a continental arc, as in the Andes. It is recorded, but adds no crust.
   - An arc stays where it formed when its trench moves away, as a remnant arc.
+  - Island arc crust starts 25 km thick and thickens 2 km every 10 Myr its trench still feeds
+    it, up to 35 km.
 - **Terranes.** A piece of continental crust of up to a million km² (an island arc, or a
   microcontinent you painted) that reaches a trench its plate goes down is not subducted. It
   accretes to the overriding plate, along with the ocean around it out to the trench. The trench
-  steps outboard of it and carries on. Larger continents collide as before.
+  steps outboard of it and carries on. Larger continents collide. The size limit is a project
+  setting.
 
 The map outlines island arcs, continental arcs and terranes. **Arcs and terranes** lists each one
 with its story: where it formed, and when and to which plate it accreted.
@@ -140,7 +154,8 @@ with its story: where it formed, and when and to which plate it accreted.
 **Export to GPlates** writes a folder beside the project file containing:
 - `rotation.rot`;
 - `Plates`, `Continents`, `Cratons`, `Island arcs`, `Continental arcs`, `Accreted terranes`,
-  `Rifts`, `Ocean crust`, `Divergent`, `Convergent` and `Transform` `.gpml` layers.
+  `Rifts`, `Failed rifts`, `Ocean crust`, `Divergent`, `Convergent` and `Transform` `.gpml`
+  layers. A rift whose two sides have welded back into one plate is a failed rift.
 
 A plate made by a rift or a back-arc rotates relative to the plate it came from, as in a
 hand-built rotation tree. Every other plate rotates relative to the anchor plate 000.
@@ -163,14 +178,15 @@ the polarity GPlates reads as the overriding plate's side. Edits made in GPlates
   - Where the plates pull apart across a trench, the new ocean is split between the two plates,
     unless you open a back-arc there.
 - **Arcs and terranes.**
-  - Arcs grow only as a band 30 km either side of the volcanic front. They do not thicken or
-    mature over time, and they render as plain lowland.
-  - The million km² terrane limit is fixed, and so is the choice to accrete rather than collide;
-    neither can yet be decided case by case.
+  - Arcs grow only as a band 30 km either side of the volcanic front, and render as plain
+    lowland, without volcanic relief.
+  - Whether a piece of continent accretes or collides is decided by its size alone; you cannot yet
+    choose for one piece.
 - **Rifts.**
   - A rift splits a plate at once; there is no slow continental rifting stage before the ocean
     opens.
-  - Rifts that fail are not tracked as failed rifts.
+  - A failed rift is only one whose sides have welded back together. A rift that stops opening
+    while its plates stay separate still counts as a rift.
 - **Time resolution.** Sub-steps are a fixed 2.5 Myr, so a fast plate moves a few hundred
   kilometres per sub-step. A 10 Myr step takes about ten seconds for a dozen plates.
 - **Export.**

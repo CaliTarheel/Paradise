@@ -69,6 +69,9 @@
       <input id="ocean-age" type="number" value="60" step="5">
       <label class="check"><input id="auto-trenches" type="checkbox" checked> Trenches form by themselves once plates have converged 100 km</label>
       <p class="hint">Turn this off to declare every trench yourself.</p>
+      <label for="terrane-max">Largest terrane that accretes (thousand km²)</label>
+      <input id="terrane-max" type="number" value="1000" min="0" step="100">
+      <p class="hint">Smaller pieces of continent reaching a trench join the overriding plate; larger ones collide. 0: all collide.</p>
       <button id="build" class="primary">Build world</button>
       <p class="hint">Building replaces the history with this painting.</p>
     </aside>
@@ -131,6 +134,9 @@
           <button id="subduct-right"></button>
           <button id="end-subduction">End subduction</button>
           <button id="open-backarc">Open a back-arc behind it</button>
+          <button id="weld">Weld these plates now</button>
+          <button id="keep-apart">Keep these plates apart</button>
+          <button id="allow-weld">Let them weld</button>
           <button id="pick-clear">Clear</button>
         </div>
       </div>
