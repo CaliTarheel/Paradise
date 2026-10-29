@@ -1,6 +1,7 @@
 """The polygon core: sphere geometry, the boundary network and the closed crust ledger."""
 import math
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -40,6 +41,25 @@ class SphereTests(unittest.TestCase):
         pieces = sphere.area_km2(sphere.intersection(strip, cut)) + sphere.area_km2(sphere.difference(strip, cut))
         self.assertAlmostEqual(pieces / sphere.area_km2(strip), 1., places=9)
         self.assertAlmostEqual(sphere.area_km2(strip), 3000., delta=1.)
+
+    def test_tidying_a_ring_that_turns_back_at_every_vertex_ends(self):
+        # A zig-zag along one line: every vertex is a spike, so none is the first of a run of
+        # spikes, and the tidy loop used to take nothing out and never end. The second ring is the
+        # four-vertex sliver of accreted crust that hung a history run (its vertices are teeth:
+        # turning back within TOOTH_COSINE, cutting off less than the level of detail).
+        zigzag = sphere.from_lonlat([0., .01, .002, .008], [0., 0., 0., 0.])
+        sliver = np.array([[-0.3776981750984502, -0.32678257470424504, 0.8663470652094142],
+                           [-0.3778340534576856, -0.3266267045213445, 0.8663465957347908],
+                           [-0.3776458052244879, -0.32684264109776046, 0.8663472362491779],
+                           [-0.377703098990139, -0.32677683616478403, 0.866347083078935]])
+        for ring, tooth in ((zigzag, 0.), (sliver, sphere.DETAIL_KM2)):
+            result = []
+            worker = threading.Thread(target=lambda: result.append(sphere.tidy_ring(ring, tooth_km2=tooth)), daemon=True)
+            worker.start()
+            worker.join(10.)
+            self.assertFalse(worker.is_alive(), 'tidy_ring did not finish')
+            self.assertLessEqual(len(result[0]), len(ring))
+        self.assertTrue(sphere.is_empty(sphere.polygon_robust(sliver, minimum_km2=sphere.DETAIL_KM2)))
 
     def test_rings_that_touch_themselves_split_into_loops(self):
         points = sphere.from_lonlat([0., 1., 2., 1., 3., .5], [0., 0., 1., 0., 2., 1.])

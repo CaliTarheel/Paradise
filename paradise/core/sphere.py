@@ -307,7 +307,14 @@ def tidy_ring(ring, tolerance=1e-10, tooth_km2=0.):
             spike |= (cosine < TOOTH_COSINE) & (triangle < tooth_km2)
         if not spike.any():
             break
-        spike &= ~np.roll(spike, 1)  # one of two neighbouring spikes at a time
+        first = spike & ~np.roll(spike, 1)  # one of two neighbouring spikes at a time
+        if not first.any():
+            # Every vertex turns back: a zig-zag along one line, enclosing nothing. No spike is
+            # the first of a run then, so take every other one, or nothing goes and this loop
+            # never ends (a four-vertex sliver of accreted crust hung a whole history run).
+            first = spike.copy()
+            first[1::2] = False
+        spike = first
         if len(points) - spike.sum() < 3:
             break
         points = points[~spike]

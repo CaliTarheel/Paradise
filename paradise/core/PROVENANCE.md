@@ -21,6 +21,10 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
 - `sphere.loop_area_km2` fans each loop from the mean direction of its vertices instead of its
   first vertex. The fan from a vertex is degenerate when the loop passes through the point opposite
   it, which is what a plate painted from pole to pole does; such plates failed to rotate.
+- `sphere.tidy_ring` ends on a ring that turns back at every vertex (a zig-zag along one line,
+  enclosing nothing). Taking one of each two neighbouring spikes left nothing to take when every
+  vertex was one, so the loop repeated unchanged for ever; a four-vertex sliver of accreted crust
+  hung a history run inside `clean`. Every other spike goes instead.
 - `render.draw` writes to a file object as well as a path.
 - `RegionWorld._initiate` reads the closing needed to start a trench from the world's
   `initiation_km` attribute when it has one (default `INITIATION_KM`), so a project can leave every
