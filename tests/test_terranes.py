@@ -29,33 +29,29 @@ def continent_km2(world, plate):
 
 
 class ArcTests(unittest.TestCase):
-    def test_an_arc_rises_behind_a_trench_that_has_lasted_a_step(self):
-        history = History(world_with_a_microcontinent())
+    def test_arcs_rise_behind_a_trench_that_has_lasted_a_step(self):
+        history = History(world_with_a_microcontinent(radius_km=0.))
         first = history.commit({1: EAST}, events=[TRENCH])
         self.assertEqual(first.features, [])   # a trench declared this step has fed no arc yet
         second = history.commit({1: EAST})
         arcs = [f for f in second.features if f.kind == 'island_arc']
-        self.assertEqual(len(arcs), 1)
-        arc = arcs[0]
-        self.assertEqual(arc.plate, 2)
-        self.assertAlmostEqual(continent_km2(second.world, 2), arc.area_km2(), delta=1.)
-        # The arc lies on the overriding plate, ARC_OFFSET_KM inboard of the trench (east of 0 degrees).
-        lon, lat = sphere.to_lonlat(sphere.rotate(centroid(arc.shape), second.world.frame(2)))
-        trench_lon = np.mean([p[0] for t in second.trenches for p in t['points'] if abs(p[1] - float(lat)) < 20.])
-        offset_km = (float(lon) - trench_lon) * np.pi / 180. * sphere.RADIUS_KM * np.cos(np.radians(float(lat)))
-        self.assertAlmostEqual(offset_km, terranes.ARC_OFFSET_KM, delta=60.)
-        self.assertIn('arc_born', {e['kind'] for e in second.entries[-1]['events']})
-
-    def test_an_arc_still_fed_by_its_trench_matures(self):
-        history = History(world_with_a_microcontinent(radius_km=0.))   # no microcontinent
-        history.commit({1: EAST}, events=[TRENCH])
-        history.commit({1: EAST})
-        young = [c.thickness_km for c in history.current.world.crust if c.kind == 'continent']
-        history.commit({1: EAST})
-        older = [c.thickness_km for c in history.current.world.crust if c.kind == 'continent']
-        self.assertEqual(min(young), terranes.ARC_THICKNESS_KM)
-        self.assertGreater(max(older), terranes.ARC_THICKNESS_KM)
-        self.assertLessEqual(max(older), terranes.ARC_MATURE_KM)
+        trench_km = sum(t['length_km'] for t in second.trenches)
+        # Separate stretches about ARC_SEGMENT_KM long, as in Artifexia, all on the overriding plate.
+        self.assertGreater(len(arcs), .5 * trench_km / (terranes.ARC_SEGMENT_KM + terranes.ARC_GAP_KM))
+        self.assertEqual({a.plate for a in arcs}, {2})
+        for a in arcs:
+            self.assertLess(a.area_km2(), 1.3 * terranes.ARC_SEGMENT_KM * 2. * terranes.ARC_HALF_WIDTH_KM)
+        # Arcs are features: the crust is untouched.
+        self.assertEqual(continent_km2(second.world, 2), 0.)
+        # Each lies ARC_OFFSET_KM inboard of the trench (east of 0 degrees).
+        for a in arcs[:3]:
+            lon, lat = sphere.to_lonlat(sphere.rotate(centroid(a.shape), second.world.frame(2)))
+            near = [p[0] for t in second.trenches for p in t['points'] if abs(p[1] - float(lat)) < 5.]
+            offset_km = (float(lon) - np.mean(near)) * np.pi / 180. * sphere.RADIUS_KM * np.cos(np.radians(float(lat)))
+            self.assertAlmostEqual(offset_km, terranes.ARC_OFFSET_KM, delta=60.)
+        # A trench that stays put makes no more arcs where it has them.
+        third = history.commit({1: EAST})
+        self.assertLessEqual(len([f for f in third.features if f.kind == 'island_arc']), len(arcs) + 2)
 
     def test_an_offset_line_that_turns_straight_back_has_no_gaps(self):
         line = sphere.from_lonlat([0., 0., 0.], [0., 10., 0.])   # north, then straight back south

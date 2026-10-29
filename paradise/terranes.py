@@ -3,11 +3,12 @@
 Both are bookkeeping rules, not mechanics:
 
 - **Arcs.** Behind every trench that has lasted a whole step and closes at least
-  ARC_MIN_CLOSING_CM_YR, a band ARC_HALF_WIDTH_KM either side of a line ARC_OFFSET_KM inboard of the
-  trench (on the overriding plate) is volcanic arc. Where that band lies on the overriding plate's
-  ocean it becomes new, thin continental crust: an island arc. Where it lies on continent it is a
-  continental (Andean) arc, recorded but adding no crust. An arc left behind when its trench moves
-  away stays where it is, as a remnant arc; arcs do not ride their trenches across oceans.
+  ARC_MIN_CLOSING_CM_YR, the volcanic front ARC_OFFSET_KM inboard of the trench (on the overriding
+  plate) is cut into stretches, and each stretch with no arc yet gets one: a band ARC_HALF_WIDTH_KM
+  either side of it, an island arc over ocean or a continental (Andean) arc over continent. Arcs
+  are features, as in the hand-built Artifexia project, not crust: making them crust cut the
+  ocean into hundreds of slivers. An arc left behind when its trench moves away stays where it is,
+  as a remnant arc; arcs do not ride their trenches across oceans.
 - **Terranes.** Before each sub-step, any piece of continental crust no larger than
   TERRANE_MAX_KM2 (an island arc, a microcontinent) that will reach a trench its plate goes down
   is taken off the downgoing plate, with the ocean around it to the trench, and given to the
@@ -31,9 +32,8 @@ from paradise.core.world import Crust
 
 ARC_OFFSET_KM = 150.         # trench to volcanic front, as in most arcs (about 100 to 200 km)
 ARC_HALF_WIDTH_KM = 15.      # 30 km wide, as the hand-built Artifexia arcs are (median 28 km)
-ARC_THICKNESS_KM = 25.       # juvenile arc crust, thinner than mature continent
-ARC_GROWTH_KM_PER_MYR = .2   # an arc still fed by its trench thickens towards mature crust
-ARC_MATURE_KM = 35.
+ARC_SEGMENT_KM, ARC_GAP_KM = 800., 150.   # Artifexia's arcs are separate, typically 800 km long
+ARC_NEAR_KM = 100.           # a stretch of front with an arc this close has one already
 ARC_MIN_CLOSING_CM_YR = 1.
 ARC_MIN_KM2 = 1000.          # an arc smaller than this is not worth keeping
 TERRANE_MAX_KM2 = 1e6        # about Japan and Kamchatka together; anything larger collides
@@ -113,12 +113,31 @@ def _trench_runs(world):
 
 
 # --------------------------------------------------------------------------------------------- arcs
+def _chunks(points, length_km, gap_km):
+    """`points` cut into stretches about `length_km` long with `gap_km` between them."""
+    lengths = np.r_[0., np.cumsum(sphere.arc_km(points[:-1], points[1:]))]
+    total = lengths[-1]
+    if total <= length_km:
+        return [points]
+    count = max(1, int(round((total + gap_km) / (length_km + gap_km))))
+    stride = (total + gap_km) / count
+    chunks = []
+    for k in range(count):
+        lo, hi = k * stride, k * stride + stride - gap_km
+        inside = (lengths >= lo) & (lengths <= hi)
+        if inside.sum() >= 2:
+            chunks.append(points[inside])
+    return chunks
+
+
 def grow_arcs(world, trenches: list, before: list, features: list, time_myr: float, step_myr: float = 10.) -> list:
-    """Add this step's arcs to `world` and `features`; returns events for arcs that are new.
+    """Add this step's new arcs to `features`; returns events for them.
 
     `trenches` are the step's trench records (paradise.events.trenches) and `before` the previous
     step's: only a trench of the same plates and polarity in both has been going down long enough to
-    feed an arc.
+    feed an arc. Its volcanic front is cut into stretches ARC_SEGMENT_KM long, as the hand-built
+    Artifexia arcs are, and each stretch with no arc of its plate within ARC_NEAR_KM gets one. Arcs
+    are features on the plate, not crust: they leave the core's geometry alone.
     """
     lasting = {(tuple(t['plates']), t['overriding']) for t in before}
     events = []
@@ -132,70 +151,27 @@ def grow_arcs(world, trenches: list, before: list, features: list, time_myr: flo
         front = offset_line(points, ARC_OFFSET_KM, to_left=(over == t['plates'][0]))
         if len(front) < 2:
             continue
-        band = sphere.intersection(sphere.strip(front, ARC_HALF_WIDTH_KM), world.regions[over])
-        if sphere.area_km2(band) < ARC_MIN_KM2:
-            continue
         frame = world.frame(over)
-        local = sphere.rotate_geography(band, frame.T, tolerance=1e-4)
-        new_arc, on_continent = [], []
-        kept = []
-        for c in world.crust:
-            if c.plate != over:
-                kept.append(c)
-                continue
-            inside = sphere.intersection(c.shape, local)
-            if sphere.area_km2(inside) < sphere.DETAIL_KM2:
-                kept.append(c)
-                continue
-            if c.kind == 'ocean':
-                c.shape = sphere.difference(c.shape, inside)
-                new_arc.append(inside)
-            else:
-                on_continent.append(inside)
-                if c.thickness_km < ARC_MATURE_KM and _is_arc(features, over, c.shape):
-                    # Arc crust still fed by its trench matures; its thickness mesh is built again
-                    # from the new mean.
-                    c.thickness_km = min(ARC_MATURE_KM, c.thickness_km + ARC_GROWTH_KM_PER_MYR * step_myr)
-                    c.mesh = None
-            kept.append(c)
-        world.crust = [c for c in kept if sphere.area_km2(c.shape) >= sphere.DETAIL_KM2]
+        continent = [c.shape for c in world.crust if c.plate == over and c.kind == 'continent']
+        continent = sphere.union(*continent) if continent else None
         pair = '%d and %d' % tuple(t['plates'])
-        if new_arc:
-            shape = sphere.union(*new_arc)
-            if sphere.area_km2(shape) >= ARC_MIN_KM2:
-                world.crust.append(Crust(over, 'continent', shape, None, ARC_THICKNESS_KM))
-                if _merge_into(features, 'island_arc', over, shape) is None:
-                    ident = _next_ident(features)
-                    features.append(Feature(ident, 'island_arc', over, shape, time_myr,
-                                            'island arc of the trench between plates %s' % pair))
-                    events.append(dict(kind='arc_born', plate=over, plates=list(t['plates']), feature=ident,
-                                       area_km2=round(sphere.area_km2(shape))))
-        if on_continent:
-            # Arcs already there (island arcs, terranes) are not a new continental arc.
-            shape = sphere.union(*on_continent)
-            for f in features:
-                if f.plate == over and f.kind in ('island_arc', 'terrane'):
-                    shape = sphere.difference(shape, f.shape)
-            if sphere.area_km2(shape) >= ARC_MIN_KM2 and _merge_into(features, 'continental_arc', over, shape) is None:
-                features.append(Feature(_next_ident(features), 'continental_arc', over, shape, time_myr,
-                                        'continental arc of the trench between plates %s' % pair))
+        for chunk in _chunks(front, ARC_SEGMENT_KM, ARC_GAP_KM):
+            band = sphere.intersection(sphere.strip(chunk, ARC_HALF_WIDTH_KM), world.regions[over])
+            area = sphere.area_km2(band)
+            if area < ARC_MIN_KM2:
+                continue
+            local = sphere.rotate_geography(band, frame.T, tolerance=1e-4)
+            on_land = sphere.area_km2(sphere.intersection(local, continent)) if continent is not None else 0.
+            kind = 'continental_arc' if on_land > .5 * area else 'island_arc'
+            if any(f.plate == over and f.kind == kind and _distance_km(f.shape, local) < ARC_NEAR_KM for f in features):
+                continue   # an arc is there already
+            ident = _next_ident(features)
+            features.append(Feature(ident, kind, over, local, time_myr,
+                                    '%s of the trench between plates %s' % (kind.replace('_', ' '), pair)))
+            if kind == 'island_arc':
+                events.append(dict(kind='arc_born', plate=over, plates=list(t['plates']), feature=ident,
+                                   area_km2=round(area)))
     return events
-
-
-def _is_arc(features, plate, shape) -> bool:
-    """Whether most of a crust piece is an island arc of this plate."""
-    area = sphere.area_km2(shape)
-    arcs = [f.shape for f in features if f.plate == plate and f.kind == 'island_arc']
-    return bool(arcs) and area > 0. and sphere.area_km2(sphere.intersection(shape, sphere.union(*arcs))) > .5 * area
-
-
-def _merge_into(features, kind, plate, shape):
-    """Join `shape` to a feature of this kind on this plate that it touches; the feature, or None."""
-    for f in features:
-        if f.kind == kind and f.plate == plate and _distance_km(f.shape, shape) < 1.:
-            f.shape = sphere.union(f.shape, shape)
-            return f
-    return None
 
 
 # ----------------------------------------------------------------------------------------- terranes
@@ -243,6 +219,12 @@ def _next_accretion(world, features, rotations, dt):
             pieces[plate] = found
         return pieces[plate]
 
+    def arc_shapes(plate):
+        # Island arcs are features on the ocean, not crust, and accrete like continental pieces.
+        frame = world.frame(plate)
+        return [sphere.rotate_geography(f.shape, frame, tolerance=1e-4) for f in features
+                if f.plate == plate and f.kind == 'island_arc' and not sphere.is_empty(f.shape)]
+
     for b, start, stop, over, down in _trench_runs(world):
         if down not in world.regions or over not in world.regions or frozenset((over, down)) in barred:
             continue
@@ -251,7 +233,7 @@ def _next_accretion(world, features, rotations, dt):
         closing = float(np.max(-opening, initial=0.))
         if closing <= 0.:
             continue
-        parts = continental_parts(down)
+        parts = continental_parts(down) + arc_shapes(down)
         if not parts:
             continue
         reach = closing * dt + ACCRETE_MARGIN_KM
@@ -352,9 +334,17 @@ def tidy(world, features: list) -> list:
             if new is None:
                 continue
             f.plate, f.shape = new, sphere.rotate_geography(world_shape, world.frame(new).T, tolerance=1e-4)
-        # Every feature lies on continental crust; whatever of it is no longer there has gone.
-        continent = [c.shape for c in world.crust if c.plate == f.plate and c.kind == 'continent']
-        f.shape = sphere.intersection(f.shape, sphere.union(*continent)) if continent else sphere.EMPTY
+        if f.kind == 'island_arc':
+            # An island arc is a feature on its plate's ocean: whatever of it has left the plate
+            # (gone down a trench, say) has gone.
+            # Clipped in the world frame: the arc is small, its plate may be most of the sphere.
+            frame = world.frame(f.plate)
+            here = sphere.intersection(sphere.rotate_geography(f.shape, frame, tolerance=1e-4), world.regions[f.plate])
+            f.shape = sphere.rotate_geography(here, frame.T, tolerance=1e-4) if not sphere.is_empty(here) else sphere.EMPTY
+        else:
+            # Every other feature lies on continental crust; whatever of it is no longer there has gone.
+            continent = [c.shape for c in world.crust if c.plate == f.plate and c.kind == 'continent']
+            f.shape = sphere.intersection(f.shape, sphere.union(*continent)) if continent else sphere.EMPTY
         if f.area_km2() >= ARC_MIN_KM2:
             result.append(f)
     return result
