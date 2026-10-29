@@ -270,7 +270,12 @@ def loop_area_km2(loop) -> float:
     loop = np.asarray(loop, float)
     if len(loop) < 3:
         return 0.
-    a, b, c = loop[0], loop[1:-1], loop[2:]
+    # Fan the loop from the direction of its vertices' mean, not from its first vertex: a fan from a
+    # vertex is degenerate for any vertex opposite it (a loop through both poles, as a plate painted
+    # from pole to pole is), and the mean of a loop smaller than a hemisphere lies inside it.
+    mean = loop.mean(axis=0)
+    a = mean / np.linalg.norm(mean) if np.linalg.norm(mean) > 1e-9 else loop[0]
+    b, c = loop, np.roll(loop, -1, axis=0)
     numerator = np.einsum('j,ij->i', a, np.cross(b, c))
     denominator = 1. + b @ a + np.einsum('ij,ij->i', b, c) + c @ a
     return float(2. * np.arctan2(numerator, denominator).sum()) * RADIUS_KM ** 2
