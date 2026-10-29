@@ -1,0 +1,194 @@
+"""Export a history as a GPlates project: a rotation file and feature collections, one per layer.
+
+Model time runs forward from 0 at the painted start; GPlates counts age back from the present. Age is
+`start_age_ma - time_myr`, so the start is at `start_age_ma` and the latest step at the youngest age.
+
+Each plate's total rotation at an age is its frame then: the rotation from its own frame, which is
+where its crust was at the start, to where it is. Every feature is a snapshot of one step, valid
+from that step's age until the next step's, with its geometry carried back into its plate's frame.
+GPlates then rotates it smoothly between steps: within a step each plate turns about one pole, and
+GPlates' interpolation between two rotations about one pole is that turn.
+
+Layers follow the hand-built Artifexia project, as far as this phase of the model goes.
+"""
+from __future__ import annotations
+
+import math
+import os
+
+import numpy as np
+import pygplates
+
+from paradise.core import sphere
+
+ANCHOR = 0
+NOTE = 'Paradise'
+
+BOUNDARY_TYPES = {
+    'ridge': ('MidOceanRidge', 'Divergent'),
+    'trench': ('SubductionZone', 'Convergent'),
+    'collision': ('OrogenicBelt', 'Convergent'),
+    'converging': ('UnclassifiedFeature', 'Convergent'),
+    'transform': ('Transform', 'Transform'),
+}
+
+
+def matrix_pole(matrix) -> tuple:
+    """(lat, lon, angle in degrees) of a rotation matrix."""
+    matrix = np.asarray(matrix, float)
+    angle = math.acos(max(-1., min(1., (np.trace(matrix) - 1.) / 2.)))
+    if angle < 1e-12:
+        return 90., 0., 0.
+    axis = np.array([matrix[2, 1] - matrix[1, 2], matrix[0, 2] - matrix[2, 0], matrix[1, 0] - matrix[0, 1]])
+    if np.linalg.norm(axis) < 1e-9:
+        # Near 180 degrees: the axis is the column of (R + I) with the largest norm.
+        m = matrix + np.eye(3)
+        axis = m[:, int(np.argmax(np.linalg.norm(m, axis=0)))]
+    lon, lat = sphere.to_lonlat(sphere.unit(axis))
+    return float(lat), float(lon), math.degrees(angle)
+
+
+def rotation_rows(history) -> list:
+    """(plate, age, lat, lon, angle, fixed plate) rows for every plate at every sub-step it exists."""
+    project = history.project
+    rows = []
+    seen = {}
+    for snapshot in history.snapshots:
+        for time_myr, frames in snapshot.frames:
+            for plate, frame in frames.items():
+                key = (plate, round(time_myr, 6))
+                if key in seen:
+                    continue
+                seen[key] = True
+                lat, lon, angle = matrix_pole(frame)
+                rows.append((plate, project.age_ma(time_myr), lat, lon, angle, ANCHOR))
+    rows.sort(key=lambda r: (r[0], r[1]))   # GPlates reads each plate's rows youngest first
+    return rows
+
+
+def write_rotations(history, path):
+    """A PLATES4 rotation file (.rot); each plate relative to the anchor plate 000."""
+    with open(path, 'w', encoding='ascii') as f:
+        for plate, age, lat, lon, angle, fixed in rotation_rows(history):
+            f.write('%03d %9.4f %9.4f %10.4f %10.4f  %03d ! %s plate %d\n'
+                    % (plate, age, lat, lon, angle, fixed, NOTE, plate))
+
+
+def _points_on_sphere(points) -> list:
+    lon, lat = sphere.to_lonlat(np.asarray(points, float))
+    return list(zip(lat.tolist(), lon.tolist()))
+
+
+def _polygons(geography, back) -> list:
+    """pygplates polygons of a geography, carried by `back` (world to plate frame)."""
+    result = []
+    for rings in sphere.polygons(geography):
+        if len(rings[0]) < 3:
+            continue
+        exterior = _points_on_sphere(sphere.rotate(rings[0], back))
+        interiors = [_points_on_sphere(sphere.rotate(r, back)) for r in rings[1:] if len(r) >= 3]
+        try:
+            result.append(pygplates.PolygonOnSphere(exterior, interiors) if interiors
+                          else pygplates.PolygonOnSphere(exterior))
+        except (pygplates.InvalidPointsForPolygonConstructionError, ValueError):
+            continue
+    return result
+
+
+def _feature(kind, geometry, name, plate, begin, end, description=None):
+    feature = pygplates.Feature(pygplates.FeatureType.create_gpml(kind))
+    feature.set_geometry(geometry)
+    feature.set_name(name)
+    feature.set_reconstruction_plate_id(int(plate))
+    feature.set_valid_time(begin, end)
+    if description:
+        feature.set_description(description)
+    return feature
+
+
+def _windows(history):
+    """(snapshot, begin age, end age) for every step: each shown until the next one."""
+    project = history.project
+    snapshots = history.snapshots
+    for k, snapshot in enumerate(snapshots):
+        begin = project.age_ma(snapshot.time_myr)
+        if k + 1 < len(snapshots):
+            end = project.age_ma(snapshots[k + 1].time_myr)
+        else:
+            end = begin - project.step_myr
+        # GPlates takes a feature as existing from begin (older) to end (younger), inclusive at the
+        # older end; nudge the younger end so consecutive snapshots do not both show at one age.
+        yield k, snapshot, begin, end + 1e-3
+
+
+def layers(history) -> dict:
+    """{layer file name: [features]} for the whole history."""
+    out = {name: [] for name in ('Plates', 'Continents', 'Cratons', 'Ocean crust', 'Divergent', 'Convergent',
+                                 'Transform')}
+    for k, snapshot, begin, end in _windows(history):
+        world = snapshot.world
+        for plate in world.plates():
+            back = world.frame(plate).T
+            for polygon in _polygons(world.regions[plate], back):
+                out['Plates'].append(_feature('UnclassifiedFeature', polygon, 'plate %d step %d' % (plate, k),
+                                              plate, begin, end))
+        for c in world.crust:
+            # Crust is stored in its plate's frame already.
+            for polygon in _polygons(c.shape, np.eye(3)):
+                if c.kind == 'continent':
+                    out['Continents'].append(_feature('ContinentalCrust', polygon, 'continent step %d' % k,
+                                                      c.plate, begin, end,
+                                                      'thickness %.1f km' % c.thickness_km))
+                else:
+                    born = history.project.age_ma(c.born_myr) if c.born_myr is not None else None
+                    name = 'ocean crust %s Ma' % ('%.0f' % born if born is not None else 'unknown')
+                    out['Ocean crust'].append(_feature('OceanicCrust', polygon, name, c.plate, begin, end))
+        for plate, shape in snapshot.cratons:
+            for polygon in _polygons(shape, np.eye(3)):
+                out['Cratons'].append(_feature('Craton', polygon, 'craton', plate, begin, end))
+        for b in world.boundaries:
+            for kind, plate, line in _runs(b):
+                feature_type, layer = BOUNDARY_TYPES.get(kind, ('UnclassifiedFeature', 'Transform'))
+                back = world.frame(plate).T
+                geometry = pygplates.PolylineOnSphere(_points_on_sphere(sphere.rotate(line, back)))
+                feature = _feature(feature_type, geometry, '%s %d-%d step %d' % (kind, b.left, b.right, k),
+                                   plate, begin, end)
+                if kind in ('ridge', 'transform'):
+                    feature.set_left_plate(b.left)
+                    feature.set_right_plate(b.right)
+                    if kind == 'ridge':
+                        feature.set_conjugate_plate_id(b.right)
+                if kind == 'trench':
+                    # The overriding plate carries the trench; its polarity says which side it is on.
+                    feature.set_enumeration(pygplates.PropertyName.gpml_subduction_polarity,
+                                            'Left' if plate == b.left else 'Right')
+                out[layer].append(feature)
+    return out
+
+
+def _runs(b):
+    """(kind, carrying plate, points) for each run of one kind (and one overriding plate) along `b`."""
+    runs = []
+    n = len(b.kinds)
+    start = 0
+    for k in range(1, n + 1):
+        if k == n or b.kinds[k] != b.kinds[start] or b.overriding[k] != b.overriding[start]:
+            kind, over = b.kinds[start], b.overriding[start]
+            plate = over if kind == 'trench' and over is not None else b.left
+            runs.append((kind, plate, b.points[start:k + 1]))
+            start = k
+    return runs
+
+
+def export(history, directory) -> list:
+    """Write the rotation file and every layer into `directory`; returns the files written."""
+    os.makedirs(directory, exist_ok=True)
+    written = []
+    rotation = os.path.join(directory, 'rotation.rot')
+    write_rotations(history, rotation)
+    written.append(rotation)
+    for name, features in layers(history).items():
+        path = os.path.join(directory, name + '.gpml')
+        pygplates.FeatureCollection(features).write(path)
+        written.append(path)
+    return written

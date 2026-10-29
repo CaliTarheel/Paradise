@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paradise</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Paradise</h1>
+  <nav>
+    <button id="tab-paint" class="tab active" data-view="paint">Paint the start</button>
+    <button id="tab-step" class="tab" data-view="step">Step the history</button>
+  </nav>
+  <div id="status" role="status"></div>
+</header>
+
+<main>
+  <!-- Painting the starting world -->
+  <section id="view-paint" class="view">
+    <aside class="panel">
+      <h2>Layer</h2>
+      <div class="row">
+        <label><input type="radio" name="layer" value="plates" checked> Plates</label>
+        <label><input type="radio" name="layer" value="crust"> Crust</label>
+      </div>
+
+      <div id="plate-tools">
+        <h2>Plate</h2>
+        <div id="plate-swatches" class="swatches"></div>
+        <button id="new-plate">New plate</button>
+      </div>
+
+      <div id="crust-tools" hidden>
+        <h2>Crust</h2>
+        <div class="row">
+          <label><input type="radio" name="crust" value="0" checked> Ocean</label>
+          <label><input type="radio" name="crust" value="1"> Continent</label>
+          <label><input type="radio" name="crust" value="2"> Craton</label>
+        </div>
+      </div>
+
+      <h2>Tool</h2>
+      <div class="row">
+        <label><input type="radio" name="tool" value="brush" checked> Brush</label>
+        <label><input type="radio" name="tool" value="fill"> Fill</label>
+      </div>
+      <label for="brush-km">Brush radius <output id="brush-km-out">600</output> km</label>
+      <input id="brush-km" type="range" min="60" max="3000" step="20" value="600">
+
+      <h2>Start from</h2>
+      <label for="voronoi-count">Random plates</label>
+      <div class="row">
+        <input id="voronoi-count" type="number" min="2" max="60" value="12">
+        <input id="voronoi-seed" type="number" value="1" aria-label="Seed">
+        <button id="voronoi">Make</button>
+      </div>
+      <div class="row">
+        <button id="undo">Undo</button>
+      </div>
+
+      <h2>World</h2>
+      <label for="world-name">Name</label>
+      <input id="world-name" type="text" value="Paradise">
+      <label for="start-age">Starts at (Ma)</label>
+      <input id="start-age" type="number" value="2000" step="10">
+      <label for="ocean-age">Starting ocean age (Myr)</label>
+      <input id="ocean-age" type="number" value="60" step="5">
+      <button id="build" class="primary">Build world</button>
+      <p class="hint">Building replaces the history with this painting.</p>
+    </aside>
+    <div class="canvas-wrap">
+      <canvas id="paint" width="720" height="360" aria-label="Equirectangular map to paint on"></canvas>
+      <p class="hint">Painted at 0.5° per cell. Paint plates first, then switch to Crust and paint continents and cratons.</p>
+    </div>
+  </section>
+
+  <!-- Stepping the history -->
+  <section id="view-step" class="view" hidden>
+    <aside class="panel">
+      <h2 id="clock">No world yet</h2>
+      <p class="hint">Each step is 10 Myr. Set a stage pole for each plate that should move, preview, then commit.</p>
+      <table id="poles">
+        <thead><tr><th>Plate</th><th>Lat</th><th>Lon</th><th>°/Myr</th><th>Max cm/yr</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <label for="note">Why (kept in the history)</label>
+      <textarea id="note" rows="2"></textarea>
+      <div class="row">
+        <button id="preview">Preview</button>
+        <button id="commit" class="primary">Commit step</button>
+      </div>
+      <div id="warnings"></div>
+      <h2>History</h2>
+      <ol id="steps" start="0"></ol>
+      <div class="row">
+        <button id="export">Export to GPlates</button>
+      </div>
+      <p class="hint">The project file is saved after every step.</p>
+      <p id="export-result" class="hint"></p>
+    </aside>
+    <div class="canvas-wrap">
+      <canvas id="map" width="1440" height="720" aria-label="Map of the world at the current step"></canvas>
+      <div class="legend">
+        <span class="key ridge">Ridge</span>
+        <span class="key trench">Trench</span>
+        <span class="key transform">Transform</span>
+        <span class="key converging">Converging</span>
+        <span class="key collision">Collision</span>
+        <span class="key craton">Craton</span>
+        <span class="key preview">Preview</span>
+      </div>
+      <p class="hint">Click a plate to select its row. Shift-click the map to put the selected plate's pole there.</p>
+    </div>
+  </section>
+</main>
+<script src="paint.js"></script>
+<script src="step.js"></script>
+</body>
+</html>

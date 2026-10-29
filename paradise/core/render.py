@@ -29,7 +29,7 @@ def _tint(elevation_km):
 
 
 def draw(world, path, width=720, boundaries=True):
-    """Write a PNG map of `world` to `path` and return the per-pixel plate array."""
+    """Write a PNG map of `world` to `path` (a path or a file object) and return the per-pixel plate array."""
     height = width // 2
     lon = np.linspace(-180., 180., width, endpoint=False) + 180. / width
     lat = np.linspace(90., -90., height, endpoint=False) - 90. / height
@@ -79,5 +79,5 @@ def draw(world, path, width=720, boundaries=True):
                 if abs(x[k + 1] - x[k]) > width / 2:
                     continue  # crosses the map edge
                 pen.line([(x[k], y[k]), (x[k + 1], y[k + 1])], fill=COLOURS[kind], width=2 if kind != 'suture' else 1)
-    picture.save(path)
+    picture.save(path, format='PNG')
     return plate_of.reshape(height, width)
