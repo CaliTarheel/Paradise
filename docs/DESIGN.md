@@ -187,18 +187,7 @@ The editor paints two equirectangular grids at 0.5 degrees: plate numbers, and c
 continent, craton). `paradise/paint.py` traces each plate-and-crust piece along cell edges into rings
 with the piece on their left, so a plate larger than a hemisphere is still the region it encloses,
 then simplifies all the rings together so that neighbours still share edges and the plates still
-tile the sphere.
-
-Coastline detail then follows the Artifexia project's level of detail. Its continents have a
-vertex every 270 km (median; 100 to 700 km), its island arcs every 70 km; the painted coasts
-already had one every 78 km, so what they lacked was shape, not vertices.
-- Every vertex moves by a smooth fractal displacement field, plate boundaries included; moving only
-  the coast's bent the boundary edges that meet it into crossings.
-- Coast edges longer than 100 km are then divided by midpoint displacement, seeded from each edge's
-  ends.
-
-Both depend only on position, so shared vertices stay shared and the plates still tile the sphere.
-A ring that would still cross itself keeps its plain coast edges. No edge is left longer than two cells (about 110 km); the core's own simplifying of moved
+tile the sphere. No edge is left longer than two cells (about 110 km); the core's own simplifying of moved
 outlines allows 150 km. A declaration applies to whole segments, so that is how closely one can be
 placed. The finer edges cost nothing measurable
 per step. Cratons are continent in the core and are kept as separate outlines in their

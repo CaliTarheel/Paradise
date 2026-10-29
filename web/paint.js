@@ -211,7 +211,6 @@ document.getElementById('build').addEventListener('click', async () => {
     ocean_age_myr: Number(document.getElementById('ocean-age').value),
     auto_trenches: document.getElementById('auto-trenches').checked,
     terrane_max_km2: 1000 * Number(document.getElementById('terrane-max').value),
-    coast_detail_km: Number(document.getElementById('coast-detail').value),
     width: W, height: H,
     plates: toBase64(paint.plates), crust: toBase64(paint.crust),
   };
@@ -231,7 +230,6 @@ async function loadPainting() {
     document.getElementById('start-age').value = data.start_age_ma;
     document.getElementById('ocean-age').value = data.ocean_age_myr;
     document.getElementById('auto-trenches').checked = data.auto_trenches !== false;
-    if (data.coast_detail_km != null) document.getElementById('coast-detail').value = data.coast_detail_km;
     if (data.terrane_max_km2 != null) document.getElementById('terrane-max').value = Math.round(data.terrane_max_km2 / 1000);
   }
   swatches(); render();

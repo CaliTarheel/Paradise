@@ -7,7 +7,7 @@ import numpy as np
 import pygplates
 import spherely
 
-from paradise import gplates, paint
+from paradise import gplates
 from paradise.core import sphere
 from paradise.history import History, Project, pole_vector, vector_pole
 from paradise.paint import CONTINENT, CRATON, cell_km, world_from_grid
@@ -69,22 +69,6 @@ class PaintTests(unittest.TestCase):
         lon_c, lat_c = sphere.to_lonlat(centroid(world.regions[2]))
         self.assertGreater(abs(float(lon_c)), 170.)
         self.assertLess(abs(float(lat_c)), 1.)
-
-    def test_coastline_detail_keeps_the_tiling_and_changes_the_coast(self):
-        plates, crust = three_plates()
-        plain, _ = world_from_grid(plates, crust)
-        detailed, _ = world_from_grid(plates, crust, detail_km=paint.DETAIL_KM)
-        total = sum(sphere.area_km2(r) for r in detailed.regions.values())
-        self.assertAlmostEqual(total / sphere.SPHERE_KM2, 1., places=9)
-        for p, region in detailed.regions.items():
-            crust_km2 = sum(c.area_km2() for c in detailed.crust if c.plate == p)
-            self.assertAlmostEqual(crust_km2, sphere.area_km2(region), delta=1.)
-        coast = [c for c in detailed.crust if c.kind == 'continent'][0]
-        before = [c for c in plain.crust if c.kind == 'continent'][0]
-        moved = sphere.area_km2(sphere.difference(coast.shape, before.shape)) + \
-            sphere.area_km2(sphere.difference(before.shape, coast.shape))
-        self.assertGreater(moved, .02 * before.area_km2())   # the coast really moved
-        self.assertLess(abs(coast.area_km2() - before.area_km2()), .15 * before.area_km2())
 
     def test_plates_meeting_at_a_pole(self):
         lon, lat = grid_lonlat()
