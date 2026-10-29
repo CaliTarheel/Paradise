@@ -29,6 +29,12 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   one. On a world with collisions, small mesh triangles made the explicit scheme need so many
   cycles that it took most of each step's time. The implicit step is stable for any step and keeps
   the volume exactly, but it diffuses a little differently from the explicit one over the same time.
+- `sphere.part` handles a plate covering most of the sphere (one ocean plate round a few
+  continental ones). S2 writes such a polygon's shell as one hole's boundary, running clockwise.
+  The area check on S2's own result now covers a clockwise shell, which encloses the sphere less
+  its area; before, it was skipped, and a result missing a whole hole's worth was accepted. And the
+  loop-by-loop rebuild counts the polygon's holes when it decides whether a shell loop is really an
+  inner loop, since such a shell is larger than the polygon by its other holes.
 - `render.draw` writes to a file object as well as a path.
 - `RegionWorld._initiate` reads the closing needed to start a trench from the world's
   `initiation_km` attribute when it has one (default `INITIATION_KM`), so a project can leave every

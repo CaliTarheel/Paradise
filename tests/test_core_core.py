@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import numpy as np
+import spherely
 
 from paradise.core import sphere
 from paradise.core.build import cap_world, voronoi_world
@@ -186,3 +187,15 @@ class RenderTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class NearlyGlobalPlateTests(unittest.TestCase):
+    def test_a_plate_round_two_others_is_rebuilt_with_its_area(self):
+        """All the sphere but two plates, as a history welded it: S2 writes the shell as one hole's
+        boundary, with spikes that send it to the loop-by-loop rebuild, and the other plate as a hole."""
+        data = np.load(Path(__file__).parent / 'fixtures' / 'nearly_global_plate.npz')
+        rings = [data['arr_%d' % k] for k in range(len(data.files) - 1)]
+        whole = float(data['whole_km2'])
+        piece, lost = sphere.part(rings, whole_km2=whole)
+        self.assertAlmostEqual(sphere.area_km2(piece) / whole, 1., places=4)
+        self.assertLess(lost, 1e-4 * whole)

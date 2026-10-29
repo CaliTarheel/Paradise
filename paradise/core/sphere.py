@@ -464,8 +464,11 @@ def part(rings, minimum_km2=1e-6, whole_km2=None):
         # loop instead. (Loop areas are reliable below half the sphere.)
         shell = [loop_area_km2(loop) for loop in loops]
         cut = [abs(loop_area_km2(loop)) for hole in rings[1:] for loop in simple_loops(hole)]
-        if all(abs(a) < .45 * SPHERE_KM2 for a in shell) and sum(shell) > 0.:
-            expected = sum(shell) - sum(cut)
+        if all(abs(a) < .45 * SPHERE_KM2 for a in shell):
+            # A clockwise shell (a plate covering most of the sphere, written as a hole's boundary)
+            # encloses the sphere less its own area.
+            enclosed = sum(shell) if sum(shell) > 0. else SPHERE_KM2 + sum(shell)
+            expected = enclosed - sum(cut)
             if abs(area_km2(whole) - expected) > max(1., 1e-4 * expected):
                 whole = None
     if whole is not None:
@@ -474,8 +477,11 @@ def part(rings, minimum_km2=1e-6, whole_km2=None):
     region, dropped = EMPTY, 0.
     # A clockwise (inner) loop read as a shell encloses nearly the whole sphere; a true shell is larger
     # than the polygon only by its holes. So a shell loop is inner only beyond half the sphere and
-    # beyond the polygon's area by more than 1%.
-    limit = SPHERE_KM2 if whole_km2 is None else max(.5 * SPHERE_KM2, 1.01 * whole_km2 + 1.)
+    # beyond the polygon and its holes by more than 1%. (A plate covering most of the sphere is
+    # written as one hole's boundary, enclosing all but that hole: larger than the polygon by its
+    # other holes, which can be whole plates.)
+    holes_km2 = sum(abs(loop_area_km2(loop)) for hole in rings[1:] for loop in simple_loops(hole))
+    limit = SPHERE_KM2 if whole_km2 is None else max(.5 * SPHERE_KM2, 1.01 * (whole_km2 + holes_km2) + 1.)
     cuts = []
     for k, ring in enumerate(rings):
         for loop in simple_loops(ring):
