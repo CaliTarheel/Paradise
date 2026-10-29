@@ -116,12 +116,15 @@ class Project:
     auto_trenches: bool = True
     # The largest continental piece that accretes as a terrane instead of colliding (0: none do).
     terrane_max_km2: float = terranes.TERRANE_MAX_KM2
+    # How far coastlines are displaced into an irregular, hand-drawn shape (paradise.paint; 0: as
+    # painted). The app builds new worlds with paint.DETAIL_KM.
+    coast_detail_km: float = 0.
 
     # ------------------------------------------------------------------ files
     def to_json(self) -> dict:
         return dict(format='paradise-project', version=1, name=self.name, start_age_ma=self.start_age_ma,
                     step_myr=self.step_myr, ocean_age_myr=self.ocean_age_myr, auto_trenches=self.auto_trenches,
-                    terrane_max_km2=self.terrane_max_km2,
+                    terrane_max_km2=self.terrane_max_km2, coast_detail_km=self.coast_detail_km,
                     plate_names={str(k): v for k, v in self.plate_names.items()},
                     plates=encode_grid(self.plates), crust=encode_grid(self.crust), steps=self.steps)
 
@@ -134,7 +137,9 @@ class Project:
                    float(data.get('ocean_age_myr', 60.)),
                    {int(k): v for k, v in data.get('plate_names', {}).items()}, list(data.get('steps', [])),
                    bool(data.get('auto_trenches', True)),
-                   float(data.get('terrane_max_km2', terranes.TERRANE_MAX_KM2)))
+                   float(data.get('terrane_max_km2', terranes.TERRANE_MAX_KM2)),
+                   # Projects made before coastline detail keep the coasts they were painted with.
+                   float(data.get('coast_detail_km', 0.)))
 
     def save(self, path):
         with open(path, 'w', encoding='utf-8') as f:
@@ -150,7 +155,7 @@ class Project:
         return self.start_age_ma - time_myr
 
 
-CACHE_VERSION = 7
+CACHE_VERSION = 8
 
 
 class History:
@@ -169,7 +174,7 @@ class History:
             self.snapshots = [cached[0][1]]
         else:
             world, cratons = world_from_grid(project.plates, project.crust, project.ocean_age_myr,
-                                             project.plate_names)
+                                             project.plate_names, detail_km=project.coast_detail_km)
             self.snapshots = [Snapshot(0., world, cratons, [(0., _frames(world))], [])]
         for k, step in enumerate(project.steps, start=1):
             if k < len(cached) and cached[k][0] == self._key(k) and len(self.snapshots) == k:
@@ -181,7 +186,7 @@ class History:
         """What snapshot `k` depends on: the painting, the settings and the first `k` steps."""
         p = self.project
         digest = hashlib.sha256()
-        digest.update(json.dumps([CACHE_VERSION, SUBSTEP_MYR, p.step_myr, p.ocean_age_myr, p.auto_trenches, p.terrane_max_km2,
+        digest.update(json.dumps([CACHE_VERSION, SUBSTEP_MYR, p.step_myr, p.ocean_age_myr, p.auto_trenches, p.terrane_max_km2, p.coast_detail_km,
                                   list(p.plates.shape)]).encode())
         digest.update(np.ascontiguousarray(p.plates, np.int64).tobytes())
         digest.update(np.ascontiguousarray(p.crust, np.int64).tobytes())

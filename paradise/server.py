@@ -31,6 +31,7 @@ import numpy as np
 from paradise import gplates, plumes, relief
 from paradise.core import render, sphere
 from paradise.history import History, Project
+from paradise.paint import DETAIL_KM
 from paradise.terranes import TERRANE_MAX_KM2
 
 WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web')
@@ -55,6 +56,7 @@ class App:
         p = self.history.project
         return dict(name=p.name, start_age_ma=p.start_age_ma, ocean_age_myr=p.ocean_age_myr,
                     auto_trenches=p.auto_trenches, terrane_max_km2=p.terrane_max_km2,
+                    coast_detail_km=p.coast_detail_km,
                     width=int(p.plates.shape[1]), height=int(p.plates.shape[0]),
                     plates=base64.b64encode(p.plates.astype('<u2').tobytes()).decode('ascii'),
                     crust=base64.b64encode(p.crust.astype('<u2').tobytes()).decode('ascii'))
@@ -103,7 +105,8 @@ class App:
                           start_age_ma=float(body.get('start_age_ma', 2000.)),
                           ocean_age_myr=float(body.get('ocean_age_myr', 60.)),
                           auto_trenches=bool(body.get('auto_trenches', True)),
-                          terrane_max_km2=float(body.get('terrane_max_km2', TERRANE_MAX_KM2)))
+                          terrane_max_km2=float(body.get('terrane_max_km2', TERRANE_MAX_KM2)),
+                          coast_detail_km=float(body.get('coast_detail_km', DETAIL_KM)))
         self.history = History(project, self.cache)
         self.save()
         result = self.state()

@@ -15,6 +15,7 @@ the sphere, with the staircase of the cells taken out.
 from __future__ import annotations
 
 import math
+import zlib
 from collections import defaultdict
 
 import numpy as np
@@ -25,6 +26,19 @@ from paradise.core.regions import FULL, RegionWorld
 from paradise.core.world import Crust
 
 OCEAN, CONTINENT, CRATON = 0, 1, 2
+# Coastlines (edges between a plate's continent and its ocean) get the irregular shape of a
+# hand-drawn coast instead of the painting's smoothed cells: a smooth displacement of up to about
+# DETAIL_KM on features about a thousand km across, then midpoint displacement down to
+# DETAIL_SPACING_KM. The target is the hand-built Artifexia project's level of detail, whose
+# continents have a vertex every 270 km (median; 100 to 700 km), not a finer one: shape, not
+# vertex count, was what the painted coasts lacked. Plate boundaries take the smooth displacement
+# too, so they lose the painting's ruler-straight edges, but no midpoint detail.
+# 300 km is about as far as the smooth displacement goes before rings cross themselves (450 km
+# crossed on a nine-plate world, and then the coast keeps its painted shape).
+DETAIL_KM, DETAIL_SPACING_KM = 300., 100.
+# Midpoint displacement, as a fraction of the edge's length either way. Much above this a sharp
+# turn's children cross near its tip, and the ring keeps its plain edges instead.
+ROUGHNESS = .25
 # The longest edge simplification may leave, in cells. A declaration (a trench, say) applies to
 # whole boundary segments, so this is also how closely a declared stretch can be placed.
 EDGE_CELLS = 2.
@@ -139,7 +153,81 @@ def _ring_points(ring, corners) -> np.ndarray | None:
     return points
 
 
-def pieces_from_grid(plates: np.ndarray, kinds: np.ndarray, simplify_km2: float | None = None) -> list:
+def _valid(ring) -> bool:
+    try:
+        sphere.polygon(ring)
+        return True
+    except (ValueError, RuntimeError):
+        return False
+
+
+def _key(point):
+    return tuple(np.round(point, 9))
+
+
+def _edge_key(a, b):
+    ka, kb = _key(a), _key(b)
+    return (ka, kb) if ka < kb else (kb, ka)
+
+
+def displacement(points, km, seed=1) -> np.ndarray:
+    """A fractal displacement field: each point moved up to about `km` along the sphere.
+
+    It depends on position alone, so a vertex two rings share moves the same in both, and the
+    pieces still tile the sphere.
+    """
+    from paradise.relief import fbm
+    points = np.asarray(points, float)
+    field = np.stack([fbm(points, octaves=4, frequency=3., seed=seed + 31 * k, persistence=.55) for k in range(3)],
+                     axis=-1)
+    field -= np.sum(field * points, axis=-1, keepdims=True) * points   # along the sphere only
+    return sphere.unit(points + field * (2. * km / sphere.RADIUS_KM))
+
+
+def _midpoints(first, last, seed) -> list:
+    """Points between `first` and `last` by recursive midpoint displacement, from `first`.
+
+    Each midpoint moves square to its edge by up to ROUGHNESS of the edge's length, with a
+    random number drawn from the two ends alone, so the two rings sharing an edge get the very
+    same points; halving goes on until edges are DETAIL_SPACING_KM or less.
+    """
+    length = float(sphere.arc_km(first, last))
+    if length <= DETAIL_SPACING_KM:
+        return []
+    middle = sphere.unit(first + last)
+    side = sphere.unit(np.cross(first, last))
+    draw = zlib.crc32(np.round(np.concatenate((first, last)), 9).tobytes() + seed.to_bytes(4, 'little'))
+    r = draw / 2. ** 31 - 1.
+    middle = sphere.unit(middle + side * (r * ROUGHNESS * length / sphere.RADIUS_KM))
+    return _midpoints(first, middle, seed) + [middle] + _midpoints(middle, last, seed)
+
+
+def _add_detail(ring, coast, km, seed):
+    """`ring` with fractal detail on its coast edges.
+
+    Every vertex is moved by the smooth `displacement` field (up to about `km`), then each coast
+    edge is divided by midpoint displacement. An edge is always divided from its smaller end,
+    so the two rings sharing it get the very same points and the pieces still tile the sphere.
+    """
+    n = len(ring)
+    on_coast = np.array([_edge_key(ring[k], ring[(k + 1) % n]) in coast for k in range(n)])
+    # Every vertex moves, plate boundaries' too: moving only the coast's would bend the boundary
+    # edges that meet a coast sharply enough to cross. The field depends on position alone, so
+    # shared vertices stay shared.
+    points = displacement(np.array(ring, float), km, seed)
+    out = []
+    for k in range(n):
+        a, b = points[k], points[(k + 1) % n]
+        out.append(a)
+        if on_coast[k]:
+            forward = _key(a) < _key(b)
+            inner = _midpoints(a, b, seed) if forward else _midpoints(b, a, seed)[::-1]
+            out += inner
+    return np.array(out)
+
+
+def pieces_from_grid(plates: np.ndarray, kinds: np.ndarray, simplify_km2: float | None = None,
+                     detail_km: float = 0., seed: int = 1) -> list:
     """[(plate, kind, geography)] for every connected piece of each (plate, kind) in the grids.
 
     `kinds` holds 'ocean' or 'continent' as 0 and 1. Each piece is the region left of all of its rings
@@ -166,6 +254,24 @@ def pieces_from_grid(plates: np.ndarray, kinds: np.ndarray, simplify_km2: float 
     if flat:
         flat, _, _ = sphere.simplify_shared(flat, area_km2=simplify_km2, max_edge_km=EDGE_CELLS * cell_km(width),
                                             groups=owner)
+    if detail_km and flat:
+        coast = {_edge_key(a, b) for n, ring in zip(owner, flat) if traced[n][1] == 1
+                 for a, b in zip(ring, np.roll(ring, -1, axis=0))}
+        plain = flat
+        for _ in range(8):
+            detailed = [_add_detail(ring, coast, detail_km, seed) for ring in plain]
+            # Where detail makes a ring cross itself (a sharp corner of the painting, say), that
+            # ring's coast keeps its plain edges, in every ring that shares them, and the rest is
+            # tried again.
+            crossed = [k for k, ring in enumerate(detailed) if not _valid(ring)]
+            if not crossed:
+                break
+            for k in crossed:
+                ring = plain[k]
+                coast -= {_edge_key(a, b) for a, b in zip(ring, np.roll(ring, -1, axis=0))}
+        else:
+            detailed = plain
+        flat = detailed
     by_piece = defaultdict(list)
     for n, ring in zip(owner, flat):
         if len(ring) >= 3:
@@ -185,7 +291,7 @@ def pieces_from_grid(plates: np.ndarray, kinds: np.ndarray, simplify_km2: float 
 
 
 def world_from_grid(plates: np.ndarray, crust: np.ndarray, ocean_age_myr: float = 60.,
-                    names: dict | None = None) -> tuple:
+                    names: dict | None = None, detail_km: float = 0., seed: int = 1) -> tuple:
     """A RegionWorld at time 0 from painted grids, and the cratons as [(plate, geography)].
 
     The ocean starts `ocean_age_myr` old everywhere. Cratons are continent in the core (they move and
@@ -198,7 +304,7 @@ def world_from_grid(plates: np.ndarray, crust: np.ndarray, ocean_age_myr: float 
         raise ValueError('the plate and crust grids differ in size')
     if plates.min() < 1:
         raise ValueError('every cell needs a plate (numbers from 1)')
-    pieces = pieces_from_grid(plates, (crust > 0).astype(np.int64))
+    pieces = pieces_from_grid(plates, (crust > 0).astype(np.int64), detail_km=detail_km, seed=seed)
     world_crust = [Crust(p, kind, shape, born_myr=-ocean_age_myr if kind == 'ocean' else None)
                    for p, kind, shape in pieces]
     world = RegionWorld(world_crust, {}, {}, [], names=dict(names or {}))

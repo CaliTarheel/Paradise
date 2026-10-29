@@ -69,6 +69,9 @@
       <input id="ocean-age" type="number" value="60" step="5">
       <label class="check"><input id="auto-trenches" type="checkbox" checked> Trenches form by themselves once plates have converged 100 km</label>
       <p class="hint">Turn this off to declare every trench yourself.</p>
+      <label for="coast-detail">Coastline detail (km)</label>
+      <input id="coast-detail" type="number" value="300" min="0" max="400" step="25">
+      <p class="hint">How far coasts are pushed into an irregular, hand-drawn shape. 0 keeps them as painted.</p>
       <label for="terrane-max">Largest terrane that accretes (thousand km²)</label>
       <input id="terrane-max" type="number" value="1000" min="0" step="100">
       <p class="hint">Smaller pieces of continent reaching a trench join the overriding plate; larger ones collide. 0: all collide.</p>

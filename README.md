@@ -54,7 +54,9 @@ history when you open the project again; you can delete it at any time.
    every trench yourself. Otherwise a converging boundary also becomes a trench once it has closed
    100 km, with continent overriding ocean and younger ocean overriding older. **Largest terrane
    that accretes** sets the size above which continent reaching a trench collides instead (0: it
-   always collides).
+   always collides). **Coastline detail** pushes painted coasts into an irregular, hand-drawn shape
+   by up to that many km, at the level of detail of the hand-built Artifexia project (0 keeps them
+   as painted).
 
 ## Step the history
 
@@ -250,8 +252,12 @@ It takes about half a minute at the default 1,440 pixels wide.
   - Only plates made by rifts and back-arcs have a parent in the rotation file. The painted
     plates all hang from 000.
   - Plates are exported as polygons for each step, not as GPlates topologies.
-- **Painting resolution.** The painting is 0.5 degrees per cell, and the cells' staircase is
-  smoothed away. Detailed coastlines are left for later map rendering.
+- **Painting resolution.**
+  - The painting is 0.5 degrees per cell, and the cells' staircase is smoothed away.
+  - Coastline detail makes coasts irregular, but cannot turn a painted circle into a coast with
+    real peninsulas and bays. Paint the shapes you want.
+  - Beyond about 300 km of detail, outlines start to cross themselves and keep their painted
+    shape.
 
 ## Tests
 
