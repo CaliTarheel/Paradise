@@ -97,12 +97,55 @@ Warnings point out continent arriving at a trench, plates pulling away from thei
 long trench whose downgoing plate barely moves. Scotese's first rule of thumb: plates carried by
 a slab move fast.
 
+## Rift a plate, or open a back-arc
+
+**Rifts.**
+1. Set **Clicking the map** to **draws a rift**.
+2. Click points along the line, starting and ending beyond the edges of the plate it splits.
+3. Check the plate, which Paradise fills in from the middle of the line, and choose which side of
+   the line becomes the new plate. Left and right are seen walking the line in the order you
+   clicked it.
+4. Optionally give the new plate a pole for this step. Without one it moves with the plate it came
+   from until you give it one.
+5. **Declare the rift**, then preview or commit.
+
+Moved apart, the new boundary opens as a ridge. Moved together, it shortens and thickens any
+continent along it. The split takes the plate's crust, cratons, arcs, terranes and old sutures on
+that side with it.
+
+**Back-arcs.** Pick a trench, set a pole for the new plate if you want, and choose **Open a
+back-arc behind it**. The overriding plate's strip from the trench to 250 km inboard, its forearc
+and arc, becomes a new plate that overrides the trench. Rolled back towards the trench, it opens a
+back-arc basin behind it.
+
+## Island arcs and terranes
+
+These follow from the trenches; there is nothing to declare.
+
+- **Island arcs.** A trench that has lasted a whole step and closes at least 1 cm/yr raises a
+  volcanic arc about 150 km inboard, on the overriding plate.
+  - Over ocean the arc is new, thin crust: an island arc.
+  - Over continent it is a continental arc, as in the Andes. It is recorded, but adds no crust.
+  - An arc stays where it formed when its trench moves away, as a remnant arc.
+- **Terranes.** A piece of continental crust of up to a million km² (an island arc, or a
+  microcontinent you painted) that reaches a trench its plate goes down is not subducted. It
+  accretes to the overriding plate, along with the ocean around it out to the trench. The trench
+  steps outboard of it and carries on. Larger continents collide as before.
+
+The map outlines island arcs, continental arcs and terranes. **Arcs and terranes** lists each one
+with its story: where it formed, and when and to which plate it accreted.
+
 ## Export to GPlates
 
 **Export to GPlates** writes a folder beside the project file containing:
 - `rotation.rot`;
-- `Plates`, `Continents`, `Cratons`, `Ocean crust`, `Divergent`, `Convergent` and `Transform`
-  `.gpml` layers.
+- `Plates`, `Continents`, `Cratons`, `Island arcs`, `Continental arcs`, `Accreted terranes`,
+  `Rifts`, `Ocean crust`, `Divergent`, `Convergent` and `Transform` `.gpml` layers.
+
+A plate made by a rift or a back-arc rotates relative to the plate it came from, as in a
+hand-built rotation tree. Every other plate rotates relative to the anchor plate 000.
+
+Each arc and terrane carries its story in its description, in ages.
 
 Open them all in GPlates. Each step's features show from that step's age until the next step's.
 Trenches are in `Convergent` as subduction zones, carried by the overriding plate, with
@@ -111,17 +154,28 @@ the polarity GPlates reads as the overriding plate's side. Edits made in GPlates
 ## Limitations
 
 - **Trenches.**
-  - A declaration applies to whole boundary segments within 60 km of the stretch you pick. Long
-    straight segments can make the declared trench a little longer than the pick.
+  - A declaration applies to whole boundary segments within 60 km of the stretch you pick.
+    Segments are at most about 110 km long at the start, and up to 150 km once the core has
+    simplified moved outlines, so a declared trench can run up to about that much past either end
+    of the pick.
   - A stretch shorter than three segments takes the type of its neighbours; Paradise warns when
     that happens.
-  - Where the plates pull apart across a trench, the new ocean is split between the two plates;
-    there is no back-arc spreading yet.
-- **Rifts.** You cannot declare a rift yet.
+  - Where the plates pull apart across a trench, the new ocean is split between the two plates,
+    unless you open a back-arc there.
+- **Arcs and terranes.**
+  - Arcs grow only as a band 30 km either side of the volcanic front. They do not thicken or
+    mature over time, and they render as plain lowland.
+  - The million km² terrane limit is fixed, and so is the choice to accrete rather than collide;
+    neither can yet be decided case by case.
+- **Rifts.**
+  - A rift splits a plate at once; there is no slow continental rifting stage before the ocean
+    opens.
+  - Rifts that fail are not tracked as failed rifts.
 - **Time resolution.** Sub-steps are a fixed 2.5 Myr, so a fast plate moves a few hundred
   kilometres per sub-step. A 10 Myr step takes about ten seconds for a dozen plates.
 - **Export.**
-  - Every plate's rotation is relative to the anchor plate 000; there is no plate hierarchy yet.
+  - Only plates made by rifts and back-arcs have a parent in the rotation file. The painted
+    plates all hang from 000.
   - Plates are exported as polygons for each step, not as GPlates topologies.
 - **Painting resolution.** The painting is 0.5 degrees per cell, and the cells' staircase is
   smoothed away. Detailed coastlines are left for later map rendering.

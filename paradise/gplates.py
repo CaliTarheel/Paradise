@@ -49,19 +49,27 @@ def matrix_pole(matrix) -> tuple:
 
 
 def rotation_rows(history) -> list:
-    """(plate, age, lat, lon, angle, fixed plate) rows for every plate at every sub-step it exists."""
+    """(plate, age, lat, lon, angle, fixed plate) rows for every plate at every sub-step it exists.
+
+    A plate made by splitting another (a rift, a back-arc) turns relative to the plate it came from,
+    as in a hand-built rotation tree, when that plate is there at every one of its rows; otherwise,
+    and for every other plate, relative to the anchor plate 000.
+    """
     project = history.project
-    rows = []
-    seen = {}
+    frames_at = {}   # plate -> {time: frame}
     for snapshot in history.snapshots:
         for time_myr, frames in snapshot.frames:
             for plate, frame in frames.items():
-                key = (plate, round(time_myr, 6))
-                if key in seen:
-                    continue
-                seen[key] = True
-                lat, lon, angle = matrix_pole(frame)
-                rows.append((plate, project.age_ma(time_myr), lat, lon, angle, ANCHOR))
+                frames_at.setdefault(plate, {}).setdefault(round(time_myr, 6), frame)
+    parents = history.current.world.parents
+    rows = []
+    for plate, times in frames_at.items():
+        parent = parents.get(plate)
+        fixed = parent if parent in frames_at and all(t in frames_at[parent] for t in times) else ANCHOR
+        for time_myr, frame in times.items():
+            relative = frame if fixed == ANCHOR else frames_at[fixed][time_myr].T @ frame
+            lat, lon, angle = matrix_pole(relative)
+            rows.append((plate, project.age_ma(time_myr), lat, lon, angle, fixed))
     rows.sort(key=lambda r: (r[0], r[1]))   # GPlates reads each plate's rows youngest first
     return rows
 
@@ -123,7 +131,8 @@ def _windows(history):
 
 def layers(history) -> dict:
     """{layer file name: [features]} for the whole history."""
-    out = {name: [] for name in ('Plates', 'Continents', 'Cratons', 'Ocean crust', 'Divergent', 'Convergent',
+    out = {name: [] for name in ('Plates', 'Continents', 'Cratons', 'Island arcs', 'Continental arcs',
+                                 'Accreted terranes', 'Rifts', 'Ocean crust', 'Divergent', 'Convergent',
                                  'Transform')}
     for k, snapshot, begin, end in _windows(history):
         world = snapshot.world
@@ -146,6 +155,17 @@ def layers(history) -> dict:
         for plate, shape in snapshot.cratons:
             for polygon in _polygons(shape, np.eye(3)):
                 out['Cratons'].append(_feature('Craton', polygon, 'craton', plate, begin, end))
+        for r in getattr(snapshot, 'rifts', []):
+            # The line the plate was split along, carried by the plate it was drawn on.
+            geometry = pygplates.PolylineOnSphere(_points_on_sphere(r['points']))
+            out['Rifts'].append(_feature('ContinentalRift', geometry, '%s into plate %d' % (r['kind'].lower(), r['new']),
+                                         r['plate'], begin, end,
+                                         'split plate %d at %.0f Ma' % (r['new'], history.project.age_ma(r['time_myr']))))
+        for f in getattr(snapshot, 'features', []):
+            layer, kind = FEATURE_LAYERS[f.kind]
+            for polygon in _polygons(f.shape, np.eye(3)):
+                out[layer].append(_feature(kind, polygon, '%s %d' % (f.kind.replace('_', ' '), f.ident), f.plate,
+                                           begin, end, _story(f, history.project)))
         for b in world.boundaries:
             for kind, plate, line in _runs(b):
                 feature_type, layer = BOUNDARY_TYPES.get(kind, ('UnclassifiedFeature', 'Transform'))
@@ -164,6 +184,22 @@ def layers(history) -> dict:
                                             'Left' if plate == b.left else 'Right')
                 out[layer].append(feature)
     return out
+
+
+FEATURE_LAYERS = {
+    'island_arc': ('Island arcs', 'IslandArc'),
+    'continental_arc': ('Continental arcs', 'OrogenicBelt'),
+    'terrane': ('Accreted terranes', 'ContinentalCrust'),
+}
+
+
+def _story(feature, project) -> str:
+    """Where a feature came from and where it went, in ages, for its GPlates description."""
+    text = '%s, from %.0f Ma' % (feature.origin, project.age_ma(feature.born_myr))
+    for a in feature.accreted:
+        text += '; accreted from plate %d to plate %d at %.0f Ma' % (a['from_plate'], a['to_plate'],
+                                                                     project.age_ma(a['time_myr']))
+    return text
 
 
 def _runs(b):

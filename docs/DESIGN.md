@@ -70,20 +70,72 @@ per step. The warnings come from Scotese's rules of thumb:
 - continent arriving at a trench;
 - a long trench whose downgoing plate barely moves, since plates carried by a slab move fast.
 
+## Rifts and back-arcs
+
+`paradise/rifting.py` splits a plate in two at the start of a step. The new plate starts in its
+parent's frame, so its crust keeps its coordinates and moves with the parent until it is given a
+pole. Its number is one more than any plate the world has had, which replays the same every time.
+
+- **A rift** is a line drawn across the plate. The plate less a 1 km cut along the line falls into
+  parts, and the parts on the named side become the new plate. A line that does not cross the plate
+  from edge to edge leaves only one side, and is refused with a note.
+- **A back-arc** is the band of the overriding plate from just outboard of a trench to 250 km
+  inboard. That is past the arc, at 150 km, with room for the basin to open.
+
+The core carries a boundary's state only between the same two plates. So, before the boundaries are
+derived again, the parent's boundary segments along the new plate's edge are relabelled to the new
+plate. A trench a forearc takes over stays a trench, with the forearc overriding it. Crust,
+cratons, arcs and terranes, sutures and earlier rift lines on the new side go with the new plate.
+
+## Island arcs and terranes
+
+`paradise/terranes.py` adds two rules on top of the trenches. Both are bookkeeping; neither is
+mechanics.
+
+**Arcs.** At the end of a step, a trench of the same plates and polarity as in the previous step,
+closing at least 1 cm/yr, raises a band 30 km either side of a line 150 km inboard on the
+overriding plate.
+- The band's ocean becomes continental crust 25 km thick: an island arc.
+- Its continent is recorded as a continental arc, adding no crust.
+
+Requiring the trench to have lasted a step stands in for the few million years a slab takes to
+reach the depth where arc magmatism starts. The arc is on the overriding plate, so it stays behind
+when its trench moves away (Scotese: arcs do not ride their trenches across oceans).
+
+**Terranes.** Before each sub-step, any continental piece of at most 1 million km² that will reach,
+within that sub-step's motion plus 50 km, a trench its plate goes down is given to the overriding
+plate. The ocean around it, out to the trench, goes with it.
+- The handover happens before the core moves anything. Otherwise the core would turn the trench
+  into a collision as soon as 500 km² of continent arrived, and later weld the two plates.
+- The boundaries are derived again, keeping their state by position. The boundary round the
+  terrane can bulge further outboard than the core carries a segment's state (300 km), so every
+  segment between the two plates along the accreted zone is made trench again, with the same
+  overriding plate. The trench thus steps outboard of the terrane.
+
+Arcs and terranes are features kept beside the world, each in its plate's frame, as cratons are.
+They keep their identity and story while the core's crust pieces merge and split. After each
+sub-step a feature is clipped to its plate's continental crust, and moved to the plate under it if
+its own plate has gone.
+
 ## The painted start
 
 The editor paints two equirectangular grids at 0.5 degrees: plate numbers, and crust (ocean,
 continent, craton). `paradise/paint.py` traces each plate-and-crust piece along cell edges into rings
 with the piece on their left, so a plate larger than a hemisphere is still the region it encloses,
 then simplifies all the rings together so that neighbours still share edges and the plates still
-tile the sphere. Cratons are continent in the core and are kept as separate outlines in their
+tile the sphere. No edge is left longer than two cells (about 110 km); the core's own simplifying of moved
+outlines allows 150 km. A declaration applies to whole segments, so that is how closely one can be
+placed. The finer edges cost nothing measurable
+per step. Cratons are continent in the core and are kept as separate outlines in their
 plate's frame.
 
 ## GPlates export
 
 Age is the project's start age minus model time. A plate's total rotation at an age is its frame
-then, relative to the anchor plate 000; the rotation file has a row for every plate at every
-sub-step. Every feature is a snapshot of one step, valid until the next step, with its geometry
+then, and the rotation file has a row for every plate at every sub-step.
+- A plate made by a rift or a back-arc rotates relative to its parent, as in a hand-built tree,
+  when the parent exists at every one of its rows.
+- Every other plate rotates relative to the anchor plate 000. Every feature is a snapshot of one step, valid until the next step, with its geometry
 carried back into its plate's frame, so GPlates moves it smoothly between steps. The layers follow
 Artifexia's: Plates, Continents, Cratons, Ocean crust (named by age), Divergent, Convergent and
 Transform.
@@ -96,8 +148,10 @@ GPlates is the viewer and the place for final polish. Nothing edited there comes
 2. Isochrons as lines, the plate hierarchy in the rotation file, and branching to a new project.
 3. Events a person declares.
    - **Done:** start subduction with a chosen polarity, flip it, end it.
-   - **To do:** rift along a drawn line, trench jump, weld or keep apart, plume or LIP, calve a
-     microcontinent, back-arc spreading.
+   - **Done, as rules rather than declarations:** island and continental arcs behind lasting
+     trenches; terranes that accrete instead of colliding.
+   - **Done:** rift along a drawn line; open a back-arc behind a trench.
+   - **To do:** trench jump, weld or keep apart, plume or LIP.
 4. An advisor that proposes poles and events from the Scotese rules of thumb, and an autopilot that
    runs several steps and stops at any collision, rift, plate loss or warning.
 5. Secondary features: hotspot trails, LIPs, island arcs, back-arcs, accreted terranes, and

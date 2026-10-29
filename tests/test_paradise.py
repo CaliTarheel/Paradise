@@ -227,10 +227,10 @@ class ExportTests(unittest.TestCase):
                 age = project.age_ma(snapshot.time_myr)
                 reconstructed = []
                 pygplates.reconstruct(os.path.join(directory, 'Continents.gpml'), model, reconstructed, age)
-                self.assertEqual(len(reconstructed), 1)
-                got = reconstructed[0].get_reconstructed_geometry()
+                # The painted continent; island arcs behind the trenches are continental crust too.
                 world = snapshot.world
-                piece = [c for c in world.crust if c.kind == 'continent'][0]
+                piece = max((c for c in world.crust if c.kind == 'continent'), key=lambda c: c.area_km2())
+                got = max((r.get_reconstructed_geometry() for r in reconstructed), key=lambda g: g.get_area())
                 want = sphere.rotate(centroid(piece.shape), world.frame(piece.plate))
                 lat, lon = got.get_interior_centroid().to_lat_lon()
                 self.assertLess(float(sphere.arc_km(sphere.from_lonlat(lon, lat), want)), 5.)

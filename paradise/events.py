@@ -11,6 +11,13 @@ the step is the same every time.
   Declaring it again with the other plate over it flips its polarity.
 - `end_subduction`: the segments stop being a trench and are typed from the motion again, with
   their closing so far forgotten.
+
+Two more declarations split a plate (paradise.rifting), and may give the new plate a pole:
+
+- `rift`: a line drawn across a plate; the side named (`new_side`, left or right walking the line
+  as drawn) becomes a new plate.
+- `backarc`: behind a stretch of trench, the band of the overriding plate out to the arc and a
+  little beyond becomes a new plate, which can roll back towards the trench.
 """
 from __future__ import annotations
 
@@ -21,7 +28,8 @@ from paradise.core.build import MINIMUM_RUN, densify
 from paradise.core.topology import segment_motion
 
 REACH_KM = 60.
-KINDS = ('subduction', 'end_subduction')
+KINDS = ('subduction', 'end_subduction', 'rift', 'backarc')
+SPLITS = ('rift', 'backarc')
 # A plate carried by a slab moves fast (Scotese's first rule of thumb): below this at its trench,
 # the downgoing plate's motion is worth a second look.
 SLOW_SLAB_CM_YR = 2.
@@ -33,6 +41,22 @@ def validate(event: dict) -> dict:
     kind = event.get('kind')
     if kind not in KINDS:
         raise ValueError('unknown event %r' % kind)
+    pole = event.get('pole')
+    if pole is not None:
+        pole = [float(v) for v in pole]
+        if len(pole) != 3 or not -90. <= pole[0] <= 90.:
+            raise ValueError('a pole is latitude, longitude and a rate in degrees per Myr')
+    if kind == 'rift':
+        points = [[float(lon), float(lat)] for lon, lat in event.get('points', [])]
+        if len(points) < 2:
+            raise ValueError('a rift needs a line of two points or more')
+        side = event.get('new_side', 'left')
+        if side not in ('left', 'right'):
+            raise ValueError('the new plate of a rift is on its left or its right')
+        result = dict(kind=kind, plate=int(event['plate']), points=points, new_side=side)
+        if pole is not None:
+            result['pole'] = pole
+        return result
     plates = [int(p) for p in event.get('plates', [])]
     if len(plates) != 2 or plates[0] == plates[1]:
         raise ValueError('a %s names two different plates' % kind.replace('_', ' '))
@@ -40,7 +64,9 @@ def validate(event: dict) -> dict:
     if len(points) < 2:
         raise ValueError('a %s needs a stretch of boundary (two points or more)' % kind.replace('_', ' '))
     result = dict(kind=kind, plates=sorted(plates), points=points)
-    if kind == 'subduction':
+    if pole is not None and kind == 'backarc':
+        result['pole'] = pole
+    if kind in ('subduction', 'backarc'):
         over = int(event.get('overriding', -1))
         if over not in plates:
             raise ValueError('the overriding plate must be one of plates %d and %d' % tuple(plates))
@@ -53,6 +79,8 @@ def apply(world, events: list) -> list:
     notes = []
     for event in events:
         event = validate(event)
+        if event['kind'] in SPLITS:
+            continue   # paradise.rifting, applied by the history
         left, right = event['plates']
         line = sphere.from_lonlat(*np.array(event['points']).T)
         dense = densify(line, spacing_km=REACH_KM / 3.)

@@ -53,6 +53,8 @@ td.fast { color: var(--ridge); font-weight: 600; }
 .key::before { content: ""; display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 5px; background: var(--c); }
 .key.ridge { --c: var(--ridge); } .key.trench { --c: var(--trench); } .key.transform { --c: var(--transform); }
 .key.converging { --c: var(--converging); } .key.collision { --c: var(--collision); } .key.preview { --c: #ffffff; } .key.craton { --c: #462d14; }
+.key.island-arc { --c: #e2561f; } .key.continental-arc { --c: #b02a8a; } .key.terrane { --c: #6b3fa0; }
+#features { margin: 0; padding-left: 18px; font-size: 12px; max-height: 200px; overflow: auto; }
 .check { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; }
 .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; margin-top: 8px; }
 .card p { margin: 0 0 6px; }

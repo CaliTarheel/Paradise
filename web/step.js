@@ -5,6 +5,8 @@ const KIND_COLOURS = {
   ridge: '#d0362b', trench: '#2a5fae', transform: '#2f8a4f', converging: '#c78a12', collision: '#7a4a1c',
 };
 
+const FEATURE_COLOURS = { island_arc: '#e2561f', continental_arc: '#b02a8a', terrane: '#6b3fa0' };
+
 const stepper = {
   state: null,
   preview: null,
@@ -15,6 +17,8 @@ const stepper = {
   pick: null,
   // Declarations for the next step, sent with Preview and Commit.
   declared: [],
+  // A rift line being drawn: lon/lat points.
+  rift: [],
 
   async load() {
     const r = await fetch('/api/state');
@@ -33,10 +37,13 @@ const stepper = {
       `${state.name}: ${fmt(state.age_ma)} Ma (step ${state.steps.length - 1})`;
     this.pick = null;
     this.declared = [];
+    this.rift = [];
+    this.riftPanel();
     this.table();
     this.history();
     this.notes(state.warnings, state.events);
     this.trenchTable(state.trenches);
+    this.featureList(state.features);
     this.declaredList();
     this.pickPanel();
   },
@@ -67,6 +74,18 @@ const stepper = {
       tr.innerHTML = '<td colspan="7" class="hint">No trenches yet.</td>';
       body.appendChild(tr);
     }
+  },
+
+  featureList(features) {
+    const list = document.getElementById('features');
+    list.innerHTML = '';
+    for (const f of features || []) {
+      const li = document.createElement('li');
+      const name = { island_arc: 'Island arc', continental_arc: 'Continental arc', terrane: 'Terrane' }[f.kind] || f.kind;
+      li.textContent = `${name} ${f.ident} on plate ${f.plate}, ${Math.round(f.area_km2 / 1000).toLocaleString()} thousand km²: ${f.story}.`;
+      list.appendChild(li);
+    }
+    if (!list.children.length) list.innerHTML = '<li class="hint">None yet. Arcs rise behind trenches that have lasted a step.</li>';
   },
 
   // Boundary picking: the first click picks a whole run, a second click on it keeps the stretch between.
@@ -106,7 +125,7 @@ const stepper = {
 
   pickPanel() {
     const panel = document.getElementById('boundary-pick');
-    if (!this.pick) { panel.hidden = true; return; }
+    if (!this.pick) { panel.hidden = true; this.newPolePanel(); return; }
     panel.hidden = false;
     const { run } = this.pick;
     const [a, b] = run.plates;
@@ -124,12 +143,62 @@ const stepper = {
     const end = document.getElementById('end-subduction');
     end.hidden = run.kind !== 'trench';
     end.onclick = () => this.declare('end_subduction');
+    const backarc = document.getElementById('open-backarc');
+    backarc.hidden = run.kind !== 'trench';
+    backarc.onclick = () => this.declare('backarc', run.overriding);
+    this.newPolePanel();
     document.getElementById('pick-clear').onclick = () => { this.pick = null; this.pickPanel(); this.draw(); };
+  },
+
+  newPole() {
+    const v = ['lat', 'lon', 'rate'].map((k) => Number(document.getElementById(`new-pole-${k}`).value));
+    return v[2] ? v : null;
+  },
+
+  newPolePanel() {
+    const trench = this.pick && this.pick.run.kind === 'trench';
+    document.getElementById('new-pole').hidden = !(trench || this.rift.length);
+  },
+
+  riftPanel() {
+    const panel = document.getElementById('rift-panel');
+    panel.hidden = !this.rift.length;
+    this.newPolePanel();
+    if (!this.rift.length) return;
+    const select = document.getElementById('rift-plate');
+    const current = Number(select.value);
+    select.innerHTML = '';
+    for (const p of this.state.plates) {
+      const o = document.createElement('option'); o.value = p.id; o.textContent = `Plate ${p.id}`; select.appendChild(o);
+    }
+    // The plate under the middle of the line, unless one was chosen already.
+    const mid = this.rift[Math.floor(this.rift.length / 2)];
+    const width = this.state.map_width, height = width / 2;
+    const under = this.plateOf[Math.min(height - 1, Math.floor((90 - mid[1]) / 180 * height)) * width
+      + Math.min(width - 1, Math.floor((mid[0] + 180) / 360 * width))];
+    select.value = this.riftPlateChosen && this.state.plates.some((p) => p.id === current) ? current : under;
+    document.getElementById('rift-text').textContent = this.rift.length < 2
+      ? 'Click more points. The line must cross the plate from beyond one edge to beyond another.'
+      : `Rift line of ${this.rift.length} points, ${Math.round(lengthKm(this.rift)).toLocaleString()} km.`;
+    document.getElementById('rift-declare').disabled = this.rift.length < 2;
+  },
+
+  declareRift() {
+    const side = document.querySelector('input[name=rift-side]:checked').value;
+    const event = { kind: 'rift', plate: Number(document.getElementById('rift-plate').value), points: this.rift.slice(), new_side: side };
+    const pole = this.newPole();
+    if (pole) event.pole = pole;
+    this.declared.push(event);
+    this.rift = [];
+    this.riftPlateChosen = false;
+    this.preview = null;
+    this.riftPanel(); this.declaredList(); this.trenchTable(this.state.trenches); this.draw();
   },
 
   declare(kind, overriding) {
     const event = { kind, plates: this.pick.run.plates.slice(), points: this.pickedPoints() };
-    if (kind === 'subduction') event.overriding = overriding;
+    if (kind === 'subduction' || kind === 'backarc') event.overriding = overriding;
+    if (kind === 'backarc') { const pole = this.newPole(); if (pole) event.pole = pole; }
     this.declared.push(event);
     this.pick = null;
     this.preview = null;
@@ -259,6 +328,7 @@ const stepper = {
       polyline(ctx, o.points, w, h, selected ? '#ffffff' : 'rgba(0,0,0,0.35)', selected ? 2.5 : 1);
     }
     for (const c of lines.cratons || []) polyline(ctx, c.points, w, h, 'rgba(70,45,20,0.9)', 1.5, [3, 3]);
+    for (const f of lines.features || []) polyline(ctx, f.points, w, h, FEATURE_COLOURS[f.kind] || '#000', 1.5);
     for (const b of lines.boundaries) {
       polyline(ctx, b.points, w, h, KIND_COLOURS[b.kind] || '#000', 2.5);
       if (b.kind === 'trench' && b.overriding != null) teeth(ctx, b.points, w, h, b.overriding === b.plates[0], KIND_COLOURS.trench);
@@ -269,8 +339,16 @@ const stepper = {
         if (b.kind === 'trench' && b.overriding != null) teeth(ctx, b.points, w, h, b.overriding === b.plates[0], 'rgba(255,255,255,0.9)');
       }
     }
+    // A rift line being drawn, then declared ones.
+    const rifts = this.declared.filter((e) => e.kind === 'rift').map((e) => e.points);
+    if (this.rift.length) rifts.push(this.rift);
+    for (const line of rifts) {
+      polyline(ctx, line, w, h, 'rgba(255,255,255,0.95)', 5);
+      polyline(ctx, line, w, h, KIND_COLOURS.ridge, 2.5, [6, 4]);
+      for (const p of line) { const [x, y] = toCanvas(p, w, h); ctx.fillStyle = '#fff'; ctx.fillRect(x - 3, y - 3, 6, 6); }
+    }
     // Declarations waiting for the next step: the stretch, with teeth on the side of the plate that will override.
-    for (const e of this.declared) {
+    for (const e of this.declared.filter((e) => e.kind !== 'rift')) {
       polyline(ctx, e.points, w, h, 'rgba(255,255,255,0.95)', 6);
       polyline(ctx, e.points, w, h, e.kind === 'subduction' ? KIND_COLOURS.trench : '#555', 3, [8, 5]);
       if (e.kind === 'subduction') teeth(ctx, e.points, w, h, e.overriding === e.plates[0], KIND_COLOURS.trench, 11);
@@ -306,13 +384,20 @@ function describe(e) {
     case 'plate_split': return `Plate ${e.plate} came apart; plate ${e.new} is the new piece.`;
     case 'absorbed': return `A piece of plate ${e.plate} (${Math.round(e.area_km2 / 1000)} thousand km²) joined plate ${e.into}.`;
     case 'plate_gone': return `Plate ${e.plate} is gone.`;
-    case 'rift': return `Plate ${e.plate} rifted; plate ${e.new} is the new piece.`;
+    case 'arc_born': return `An island arc (${Math.round(e.area_km2 / 1000)} thousand km²) rose on plate ${e.plate} behind its trench with plate ${e.plates[0] === e.plate ? e.plates[1] : e.plates[0]}.`;
+    case 'accreted': return `A terrane of ${Math.round(e.area_km2 / 1000)} thousand km² from plate ${e.plate} accreted to plate ${e.into}; the trench stepped outboard of it.`;
+    case 'rift': return e.name && /forearc/.test(e.name)
+      ? `The forearc of plate ${e.plate} split off as plate ${e.new}, to open a back-arc behind it.`
+      : `Plate ${e.plate} rifted; plate ${e.new} (${Math.round(e.area_km2 / 1e6 * 10) / 10} million km²) is the new piece.`;
     default: return e.kind ? `${e.kind.replace(/_/g, ' ')}${pair ? ' (' + pair + ')' : ''}` : '';
   }
 }
 
 function describeDeclaration(e) {
+  const pole = e.pole ? `, new plate pole ${e.pole[0]}, ${e.pole[1]} at ${e.pole[2]}°/Myr` : '';
+  if (e.kind === 'rift') return `Rift across plate ${e.plate}, new plate on its ${e.new_side}${pole}`;
   const [a, b] = e.plates;
+  if (e.kind === 'backarc') return `Back-arc behind the trench between plates ${a} and ${b}, on plate ${e.overriding}${pole}`;
   if (e.kind === 'subduction') return `Trench: plate ${e.overriding === a ? b : a} goes under plate ${e.overriding}`;
   if (e.kind === 'end_subduction') return `End the trench between plates ${a} and ${b}`;
   return e.kind;
@@ -386,9 +471,11 @@ function fmt(age) { return Math.round(age * 10) / 10; }
 function mapMode() { return document.querySelector('input[name=map-mode]:checked').value; }
 
 document.querySelectorAll('input[name=map-mode]').forEach((r) => r.addEventListener('change', () => {
-  document.getElementById('map-hint').textContent = mapMode() === 'boundary'
-    ? 'Click a boundary to pick it. Click it again to keep only the stretch between your two clicks.'
-    : "Click a plate to select its row. Shift-click the map to put the selected plate's pole there.";
+  document.getElementById('map-hint').textContent = {
+    boundary: 'Click a boundary to pick it. Click it again to keep only the stretch between your two clicks.',
+    rift: 'Click points along the rift, starting and ending beyond the edges of the plate it splits.',
+    plate: "Click a plate to select its row. Shift-click the map to put the selected plate's pole there.",
+  }[mapMode()];
 }));
 
 document.getElementById('map').addEventListener('click', (e) => {
@@ -397,6 +484,11 @@ document.getElementById('map').addEventListener('click', (e) => {
   const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
   if (mapMode() === 'boundary' && !e.shiftKey) {
     stepper.pickAt(fx * canvas.width, fy * canvas.height);
+    return;
+  }
+  if (mapMode() === 'rift' && !e.shiftKey) {
+    stepper.rift.push([Math.round((fx * 360 - 180) * 100) / 100, Math.round((90 - fy * 180) * 100) / 100]);
+    stepper.riftPanel(); stepper.draw();
     return;
   }
   if (e.shiftKey && stepper.selected != null) {
@@ -433,3 +525,10 @@ document.getElementById('export').addEventListener('click', async () => {
 });
 
 stepper.load().then(() => { if (stepper.state) showView('step'); });
+
+document.getElementById('rift-declare').addEventListener('click', () => stepper.declareRift());
+document.getElementById('rift-undo').addEventListener('click', () => { stepper.rift.pop(); stepper.riftPanel(); stepper.draw(); });
+document.getElementById('rift-clear').addEventListener('click', () => {
+  stepper.rift = []; stepper.riftPlateChosen = false; stepper.riftPanel(); stepper.draw();
+});
+document.getElementById('rift-plate').addEventListener('change', () => { stepper.riftPlateChosen = true; });

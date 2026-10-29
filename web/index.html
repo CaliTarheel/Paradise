@@ -111,12 +111,16 @@
         <span class="key converging">Converging</span>
         <span class="key collision">Collision</span>
         <span class="key craton">Craton</span>
+        <span class="key island-arc">Island arc</span>
+        <span class="key continental-arc">Continental arc</span>
+        <span class="key terrane">Terrane</span>
         <span class="key preview">Preview</span>
       </div>
       <div class="row" role="radiogroup" aria-label="What a click on the map does">
         <span class="hint">Clicking the map:</span>
         <label><input type="radio" name="map-mode" value="plate" checked> selects a plate</label>
         <label><input type="radio" name="map-mode" value="boundary"> picks a boundary</label>
+        <label><input type="radio" name="map-mode" value="rift"> draws a rift</label>
       </div>
       <p class="hint" id="map-hint">Click a plate to select its row. Shift-click the map to put the selected plate's pole there.</p>
 
@@ -126,7 +130,34 @@
           <button id="subduct-left"></button>
           <button id="subduct-right"></button>
           <button id="end-subduction">End subduction</button>
+          <button id="open-backarc">Open a back-arc behind it</button>
           <button id="pick-clear">Clear</button>
+        </div>
+      </div>
+
+      <div id="rift-panel" class="card" hidden>
+        <p id="rift-text"></p>
+        <div class="row">
+          <label for="rift-plate">Plate</label>
+          <select id="rift-plate"></select>
+          <span class="hint">New plate on the</span>
+          <label><input type="radio" name="rift-side" value="left" checked> left</label>
+          <label><input type="radio" name="rift-side" value="right"> right</label>
+          <span class="hint">of the line, walking it as drawn</span>
+        </div>
+        <div class="row">
+          <button id="rift-declare">Declare the rift</button>
+          <button id="rift-undo">Remove last point</button>
+          <button id="rift-clear">Clear</button>
+        </div>
+      </div>
+
+      <div id="new-pole" class="card" hidden>
+        <p class="hint">Pole for the new plate this step (leave the rate at 0 to move it with the plate it came from):</p>
+        <div class="row">
+          <label>Lat <input id="new-pole-lat" type="number" value="90" step="1"></label>
+          <label>Lon <input id="new-pole-lon" type="number" value="0" step="1"></label>
+          <label>°/Myr <input id="new-pole-rate" type="number" value="0" step="0.05"></label>
         </div>
       </div>
 
@@ -144,6 +175,8 @@
             </table>
           </div>
           <p class="hint">Click a trench to pick it, to flip it or end it.</p>
+          <h2>Arcs and terranes</h2>
+          <ul id="features"></ul>
         </div>
       </div>
     </div>

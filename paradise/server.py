@@ -68,7 +68,7 @@ class App:
         plates = []
         for p in world.plates():
             lon, lat = sphere.to_lonlat(_centre(world.regions[p]))
-            pole = last.get(str(p))
+            pole = last.get(str(p)) or getattr(snapshot, 'new_poles', {}).get(p)
             if pole is None:
                 parent = world.parents.get(p)
                 pole = last.get(str(parent), [90., 0., 0.]) if parent is not None else [90., 0., 0.]
@@ -85,8 +85,9 @@ class App:
                     continent_share=continent / sphere.SPHERE_KM2,
                     map='data:image/png;base64,' + base64.b64encode(buffer.getvalue()).decode('ascii'),
                     plate_of=base64.b64encode(plate_of.astype('<u2').tobytes()).decode('ascii'),
-                    map_width=MAP_WIDTH, lines=_lines(world, snapshot.cratons), warnings=snapshot.warnings,
-                    events=_events(snapshot), trenches=_trenches(snapshot), auto_trenches=project.auto_trenches)
+                    map_width=MAP_WIDTH, lines=_lines(world, snapshot.cratons, snapshot.features), warnings=snapshot.warnings,
+                    events=_events(snapshot), trenches=_trenches(snapshot), auto_trenches=project.auto_trenches,
+                    features=_features(snapshot, project))
 
     # ------------------------------------------------------------------ actions
     def build(self, body) -> dict:
@@ -105,7 +106,7 @@ class App:
 
     def preview(self, body) -> dict:
         snapshot = self.history.preview(_poles(body), body.get('events') or [])
-        return dict(lines=_lines(snapshot.world, snapshot.cratons), warnings=snapshot.warnings, events=_events(snapshot),
+        return dict(lines=_lines(snapshot.world, snapshot.cratons, snapshot.features), warnings=snapshot.warnings, events=_events(snapshot),
                     trenches=_trenches(snapshot),
                     message='Preview of %.0f Ma' % self.history.project.age_ma(snapshot.time_myr))
 
@@ -164,7 +165,14 @@ def _trenches(snapshot) -> list:
     return list(getattr(snapshot, 'trenches', []))
 
 
-def _lines(world, cratons=()) -> dict:
+def _features(snapshot, project) -> list:
+    """Arcs and terranes for the side panel, with their story in ages."""
+    from paradise.gplates import _story
+    return [dict(ident=f.ident, kind=f.kind, plate=f.plate, area_km2=round(f.area_km2()), story=_story(f, project))
+            for f in getattr(snapshot, 'features', [])]
+
+
+def _lines(world, cratons=(), features=()) -> dict:
     """Boundaries by kind, plate and craton outlines, as lon/lat polylines for the browser to draw."""
     boundaries = []
     for b in world.boundaries:
@@ -186,7 +194,15 @@ def _lines(world, cratons=()) -> dict:
             for ring in rings:
                 world_ring = sphere.rotate(ring, frame)
                 craton_lines.append(dict(plate=plate, points=_lonlat(np.vstack((world_ring, world_ring[:1])))))
-    return dict(boundaries=boundaries, outlines=outlines, cratons=craton_lines)
+    feature_lines = []
+    for f in features:
+        frame = world.frame(f.plate)
+        for rings in sphere.polygons(f.shape):
+            for ring in rings:
+                world_ring = sphere.rotate(ring, frame)
+                feature_lines.append(dict(kind=f.kind, ident=f.ident, plate=f.plate,
+                                          points=_lonlat(np.vstack((world_ring, world_ring[:1])))))
+    return dict(boundaries=boundaries, outlines=outlines, cratons=craton_lines, features=feature_lines)
 
 
 # Bookkeeping the core does as plates move, not worth a person's attention: slivers below the
