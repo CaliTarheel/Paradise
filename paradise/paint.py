@@ -139,6 +139,28 @@ def _ring_points(ring, corners) -> np.ndarray | None:
     return points
 
 
+def unpinch(key: np.ndarray) -> np.ndarray:
+    """`key` with every corner-only contact joined: where two cells of one value touch only at a
+    corner (and the other two cells of the 2 by 2 are another value), one of the other two takes
+    the value, so every piece is joined along edges and no traced ring touches itself."""
+    key = np.array(key)
+    for _ in range(50):
+        a, b = key[:-1], np.roll(key, -1, axis=1)[:-1]
+        c, d = key[1:], np.roll(key, -1, axis=1)[1:]
+        # a b / c d: a and d alike, b and c each different from them (and the same for b, c).
+        pinch = ((a == d) & (b != a) & (c != a)) | ((b == c) & (a != b) & (d != b))
+        if not pinch.any():
+            return key
+        rows, cols = np.nonzero(pinch)
+        for i, j in zip(rows.tolist(), cols.tolist()):
+            j1 = (j + 1) % key.shape[1]
+            if key[i, j] == key[i + 1, j1] and key[i, j1] != key[i, j]:
+                key[i, j1] = key[i, j]
+            elif key[i, j1] == key[i + 1, j] and key[i, j] != key[i, j1]:
+                key[i, j] = key[i, j1]
+    return key
+
+
 def pieces_from_grid(plates: np.ndarray, kinds: np.ndarray, simplify_km2: float | None = None) -> list:
     """[(plate, kind, geography)] for every connected piece of each (plate, kind) in the grids.
 
@@ -147,7 +169,7 @@ def pieces_from_grid(plates: np.ndarray, kinds: np.ndarray, simplify_km2: float 
     """
     height, width = plates.shape
     corners = corner_points(height, width)
-    key = plates.astype(np.int64) * 2 + kinds.astype(np.int64)
+    key = unpinch(plates.astype(np.int64) * 2 + kinds.astype(np.int64))
     traced = []   # (plate, kind, component, ring points)
     for value in np.unique(key):
         plate, kind = int(value // 2), int(value % 2)
