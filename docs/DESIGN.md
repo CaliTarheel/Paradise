@@ -150,6 +150,37 @@ The suture lines the core keeps when it welds two plates are what remembers wher
 A pair of plates can be barred from accretion (`no_accretion`, a set on the world that
 `terranes.accrete` skips), so that even a small terrane collides there.
 
+## Maps
+
+`paradise/relief.py` renders elevation from the features at the end of a step, by rules of thumb:
+- ocean depth from age along the plate-cooling curve;
+- continental height from thickness by Airy isostasy, with thin crust (plateaus, young arcs) below
+  sea level;
+- uplift for active, former and old orogenies and for continental arcs;
+- a floor for island arcs, and deeper trenches.
+
+Smoothing:
+- The base field is smoothed over 60 km, which makes shelves and slopes out of the steps between
+  pieces.
+- Uplift is smoothed over only 15 km; smoothing a 30 km arc over 60 km sank it back into the sea.
+
+Every feature is read at points displaced by fractal noise, so that edges come out fractal, and
+noise roughens high ground. The Aerie export follows the NPZ contract in Aerie's
+`map_definitions/rocke3d_4x5/grid-definition.json`, and the TOPO variables and identity
+(`zsolid = zatmo - focean*hocean`) of its study files.
+
+## Comparison with Artifexia
+
+Measured from the hand-built project, against which these rules were checked:
+- **Arcs to terranes.** 56 of its 92 accreted terranes begin exactly when and where an island arc
+  ends, and 6 where a microcontinent ends. 70 of its 87 arcs that end become terranes, and
+  two-thirds change plate when they do. Paradise's accretion of arcs to the overriding plate
+  follows the same path.
+- **Terrane size.** A terrane is a median eight times the area of the arcs it grew from, and a
+  third of terranes grew from two arcs or more. So Paradise welds the ocean taken with a terrane
+  on as accreted crust, and merges arcs that accrete together into one terrane.
+- **Arc shape.** Arcs are about 28 km wide and typically 800 km long (250 to 2,300 km).
+
 ## The painted start
 
 The editor paints two equirectangular grids at 0.5 degrees: plate numbers, and crust (ocean,

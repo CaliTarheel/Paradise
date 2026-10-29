@@ -371,7 +371,7 @@ def _rehome(cratons: list, world) -> list:
         frame = world.frames.get(plate, np.eye(3))
         centre = sphere.rotate(_centre(shape), frame)
         lon, lat = sphere.to_lonlat(centre)
-        point = spherely.point(float(lon), float(lat))
+        point = spherely.create_point(float(lon), float(lat))
         new = next((p for p in plates if spherely.contains(world.regions[p], point)), None)
         if new is None:
             continue

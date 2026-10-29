@@ -12,6 +12,7 @@ project file is always the history so far. The browser talks to it through a few
     POST /api/commit    the next step with the given poles, kept
     POST /api/back      drop the steps after a given one
     POST /api/export    write the GPlates project beside the project file
+    POST /api/maps      write the elevation maps (and Aerie's ROCKE-3D grid) beside it
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 
-from paradise import gplates, plumes
+from paradise import gplates, plumes, relief
 from paradise.core import render, sphere
 from paradise.history import History, Project
 from paradise.terranes import TERRANE_MAX_KM2
@@ -128,6 +129,20 @@ class App:
         result = self.state()
         result['message'] = 'Back at %.0f Ma' % result['age_ma']
         return result
+
+    def maps(self, body) -> dict:
+        stem = os.path.splitext(os.path.splitext(self.path)[0])[0]
+        directory = stem + '-maps'
+        width = int(body.get('width', 1440))
+        if not 360 <= width <= 8192:
+            raise ValueError('a map is between 360 and 8192 pixels wide')
+        files = relief.write_maps(self.history, directory, width=width, seed=int(body.get('seed', 1)))
+        with open(os.path.join(directory, 'elevation.png'), 'rb') as f:
+            image = 'data:image/png;base64,' + base64.b64encode(f.read()).decode('ascii')
+        with open(os.path.join(directory, 'maps.json'), encoding='utf-8') as f:
+            summary = json.load(f)
+        return dict(directory=os.path.abspath(directory), files=[os.path.basename(f) for f in files], image=image,
+                    summary=summary, message='Made %d map files' % len(files))
 
     def export(self, body) -> dict:
         stem = os.path.splitext(os.path.splitext(self.path)[0])[0]
@@ -276,7 +291,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         routes = {'/api/build': App.build, '/api/preview': App.preview, '/api/commit': App.commit,
-                  '/api/back': App.back, '/api/export': App.export}
+                  '/api/back': App.back, '/api/export': App.export, '/api/maps': App.maps}
         route = routes.get(self.path.split('?')[0])
         if route is None:
             return self._send(404, dict(error='not found'))

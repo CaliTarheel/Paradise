@@ -92,6 +92,17 @@ class RiftTests(unittest.TestCase):
             self.assertEqual(len(rifts), 1)
             self.assertEqual(list(rifts)[0].get_feature_type(), pygplates.FeatureType.gpml_continental_rift)
 
+    def test_a_craton_goes_with_its_plate_when_the_plate_is_welded_away(self):
+        plates, crust = with_a_continent()
+        lon, lat = grid_lonlat()
+        # A craton on the northern cap, plate 3, which is smaller than plate 1 and so is the one welded away.
+        crust[sphere.arc_km(sphere.from_lonlat(lon, lat), sphere.from_lonlat(-90., 75.)[None, None]) < 500.] = 2
+        history = History(Project('test', plates, crust, start_age_ma=1000.))
+        self.assertEqual([p for p, _ in history.current.cratons], [3])
+        snapshot = history.commit({}, events=[dict(kind='weld', plates=[1, 3])])
+        self.assertNotIn(3, snapshot.world.plates())
+        self.assertEqual([p for p, _ in snapshot.cratons], [1])
+
     def test_a_rift_welded_back_exports_as_failed(self):
         history = History(self.project)
         history.commit({}, events=[dict(kind='rift', plate=1, points=LINE, new_side='right', pole=AWAY)])

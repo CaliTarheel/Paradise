@@ -11,7 +11,7 @@ Both are bookkeeping rules, not mechanics:
 - **Terranes.** Before each sub-step, any piece of continental crust no larger than
   TERRANE_MAX_KM2 (an island arc, a microcontinent) that will reach a trench its plate goes down
   is taken off the downgoing plate, with the ocean around it to the trench, and given to the
-  overriding plate. The boundaries are derived again, keeping their state by position, so the
+  overriding plate. That ocean is welded on as continental crust, and the terrane is all of it. The boundaries are derived again, keeping their state by position, so the
   trench steps outboard of the new terrane and carries on. Larger continents still collide.
 
 The arcs and terranes are kept as features beside the world, each in its plate's frame like the
@@ -30,14 +30,24 @@ from paradise.core.topology import segment_motion
 from paradise.core.world import Crust
 
 ARC_OFFSET_KM = 150.         # trench to volcanic front, as in most arcs (about 100 to 200 km)
-ARC_HALF_WIDTH_KM = 30.
+ARC_HALF_WIDTH_KM = 15.      # 30 km wide, as the hand-built Artifexia arcs are (median 28 km)
 ARC_THICKNESS_KM = 25.       # juvenile arc crust, thinner than mature continent
 ARC_GROWTH_KM_PER_MYR = .2   # an arc still fed by its trench thickens towards mature crust
 ARC_MATURE_KM = 35.
 ARC_MIN_CLOSING_CM_YR = 1.
 ARC_MIN_KM2 = 1000.          # an arc smaller than this is not worth keeping
 TERRANE_MAX_KM2 = 1e6        # about Japan and Kamchatka together; anything larger collides
+# Crumbs smaller than this are not terranes: the core takes continent arriving at a trench in pieces
+# this small as shortening, without collision.
+TERRANE_MIN_KM2 = 5000.
+# A terrane that has just accreted does not accrete again this soon. Where two plates meet along
+# trenches of both polarities, it would otherwise pass from one plate to the other and straight back.
+SETTLE_MYR = 10.
 ACCRETE_MARGIN_KM = 50.      # how far ahead of a sub-step's motion a terrane is caught
+# The ocean that accretes with a terrane (forearc, accretionary wedge, slivers of ocean floor) is
+# welded on as continental crust this thick, and is part of the terrane: in the hand-built
+# Artifexia project a terrane is a median eight times the area of the arcs it grew from.
+ACCRETED_KM = 30.
 STEPPED_KM = 5.              # boundary segments this close to an accreted zone are its new trench
 _KM_PER_S2_METRE = sphere.RADIUS_KM / spherely.EARTH_RADIUS_METERS
 
@@ -78,9 +88,14 @@ def offset_line(points, km, to_left: bool) -> np.ndarray:
     if len(points) < 2:
         return points
     segment = sphere.unit(np.cross(points[:-1], points[1:]))   # left of each segment, seen from outside
-    normal = sphere.unit(np.vstack((segment[:1], segment[:-1] + segment[1:], segment[-1:])))
+    summed = np.vstack((segment[:1], segment[:-1] + segment[1:], segment[-1:]))
+    # Where the line turns straight back, its two segments' normals cancel: take the first one's.
+    back = np.linalg.norm(summed, axis=1) < 1e-6
+    summed[back] = np.vstack((segment[:1], segment))[back]
+    normal = sphere.unit(summed)
     angle = (km if to_left else -km) / sphere.RADIUS_KM
-    return sphere.unit(points * np.cos(angle) + normal * np.sin(angle))
+    moved = sphere.unit(points * np.cos(angle) + normal * np.sin(angle))
+    return moved[np.all(np.isfinite(moved), axis=1)]
 
 
 def _trench_runs(world):
@@ -188,15 +203,46 @@ def accrete(world, features: list, rotations: dict, dt: float) -> list:
     """Hand terranes about to reach a trench to the overriding plate; returns 'accreted' events."""
     events = []
     for _ in range(8):   # each accretion changes the boundaries, so look again until none is left
-        found = _next_accretion(world, rotations, dt)
+        found = _next_accretion(world, features, rotations, dt)
         if found is None:
             break
         events.append(_transfer(world, features, rotations, *found))
     return events
 
 
-def _next_accretion(world, rotations, dt):
+def _settling(world, features, part) -> bool:
+    """Whether `part` (world frame) is mostly a terrane that accreted less than SETTLE_MYR ago."""
+    area = sphere.area_km2(part)
+    for f in features:
+        if f.kind != 'terrane' or not f.accreted or world.time_myr - f.accreted[-1]['time_myr'] >= SETTLE_MYR:
+            continue
+        if f.plate not in world.regions:
+            continue
+        shape = sphere.rotate_geography(f.shape, world.frame(f.plate), tolerance=1e-4)
+        if sphere.area_km2(sphere.intersection(shape, part)) > .5 * area:
+            return True
+    return False
+
+
+def _next_accretion(world, features, rotations, dt):
     barred = getattr(world, 'no_accretion', ())
+    largest = getattr(world, 'terrane_max_km2', TERRANE_MAX_KM2)   # a project's own limit
+    pieces = {}   # downgoing plate -> its continental pieces in the world frame, worked out once
+
+    def continental_parts(plate):
+        if plate not in pieces:
+            frame = world.frame(plate)
+            found = []
+            for c in world.crust:
+                if c.plate == plate and c.kind == 'continent':
+                    try:
+                        parts, _ = sphere.parts(sphere.rotate_geography(c.shape, frame, tolerance=1e-4))
+                    except (ValueError, RuntimeError):
+                        continue
+                    found += parts
+            pieces[plate] = found
+        return pieces[plate]
+
     for b, start, stop, over, down in _trench_runs(world):
         if down not in world.regions or over not in world.regions or frozenset((over, down)) in barred:
             continue
@@ -205,24 +251,17 @@ def _next_accretion(world, rotations, dt):
         closing = float(np.max(-opening, initial=0.))
         if closing <= 0.:
             continue
+        parts = continental_parts(down)
+        if not parts:
+            continue
         reach = closing * dt + ACCRETE_MARGIN_KM
         line = _line(b.points[start:stop + 1])
-        frame = world.frame(down)
-        for c in world.crust:
-            if c.plate != down or c.kind != 'continent':
-                continue
-            try:
-                parts, _ = sphere.parts(sphere.rotate_geography(c.shape, frame, tolerance=1e-4))
-            except (ValueError, RuntimeError):
-                continue
-            largest = getattr(world, 'terrane_max_km2', TERRANE_MAX_KM2)   # a project's own limit
-            for part in parts:
-                area = sphere.area_km2(part)
-                if area <= largest and area >= sphere.DETAIL_KM2:
-                    distance = _distance_km(part, line)
-                    if distance <= reach:
-                        others = [p for p in parts if p is not part]
-                        return part, distance, over, down, others
+        for part in parts:
+            area = sphere.area_km2(part)
+            if TERRANE_MIN_KM2 <= area <= largest:
+                distance = _distance_km(part, line)
+                if distance <= reach and not _settling(world, features, part):
+                    return part, distance, over, down, [p for p in parts if p is not part]
     return None
 
 
@@ -246,12 +285,15 @@ def _transfer(world, features, rotations, part, distance, over, down, others) ->
             c.shape = sphere.difference(c.shape, taken)
             # The piece's frame changes, so a continent's thickness mesh is built again from its mean.
             world_taken = sphere.rotate_geography(taken, world.frame(down), tolerance=1e-4)
-            moved.append(Crust(over, c.kind, sphere.rotate_geography(world_taken, to_over, tolerance=1e-4),
-                               c.born_myr, c.thickness_km))
+            # Ocean taken with the terrane is welded on with it, as accreted crust.
+            kind, born, thick = (c.kind, c.born_myr, c.thickness_km) if c.kind == 'continent' else \
+                ('continent', None, ACCRETED_KM)
+            moved.append(Crust(over, kind, sphere.rotate_geography(world_taken, to_over, tolerance=1e-4), born, thick))
         kept.append(c)
     world.crust = [c for c in kept if sphere.area_km2(c.shape) >= sphere.DETAIL_KM2] + moved
-    area = sphere.area_km2(part)
-    # The features on the terrane go with it and become (or stay) a terrane.
+    area = sphere.area_km2(zone)
+    zone_over = sphere.rotate_geography(zone, to_over, tolerance=1e-4)
+    # The features on the terrane go with it and become (or stay) a terrane: all of the zone.
     record = dict(time_myr=world.time_myr, from_plate=down, to_plate=over, area_km2=round(area))
     carried = []
     for f in features:
@@ -262,12 +304,21 @@ def _transfer(world, features, rotations, part, distance, over, down, others) ->
             f.plate, f.shape = over, sphere.rotate_geography(world_shape, to_over, tolerance=1e-4)
             f.kind = 'terrane'
             f.accreted.append(dict(record))
-            carried.append(f.ident)
-    if not carried:
+            carried.append(f)
+    if carried:
+        # Arcs accreting together are one terrane (in Artifexia, a third of terranes grew from
+        # two arcs or more), and it is the whole accreted zone.
+        first = carried[0]
+        first.shape = sphere.union(zone_over, *[f.shape for f in carried])
+        if len(carried) > 1:
+            first.origin = '%s, with %s' % (first.origin, ', '.join('%s %d' % (f.origin, f.ident) for f in carried[1:]))
+        features[:] = [f for f in features if f not in carried[1:]]
+        carried = [first.ident]
+    else:
         ident = _next_ident(features)
-        features.append(Feature(ident, 'terrane', over, sphere.rotate_geography(part, to_over, tolerance=1e-4),
-                                world.time_myr, 'microcontinent from plate %d' % down, [dict(record)]))
-        carried.append(ident)
+        features.append(Feature(ident, 'terrane', over, zone_over, world.time_myr,
+                                'microcontinent from plate %d' % down, [dict(record)]))
+        carried = [ident]
     world.regions = world._from_crust()
     world.boundaries = world._derive(world._index(), rotations)
     # The boundary round the new terrane can bulge further outboard than the core carries a

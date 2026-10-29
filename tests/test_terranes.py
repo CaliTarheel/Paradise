@@ -57,6 +57,12 @@ class ArcTests(unittest.TestCase):
         self.assertGreater(max(older), terranes.ARC_THICKNESS_KM)
         self.assertLessEqual(max(older), terranes.ARC_MATURE_KM)
 
+    def test_an_offset_line_that_turns_straight_back_has_no_gaps(self):
+        line = sphere.from_lonlat([0., 0., 0.], [0., 10., 0.])   # north, then straight back south
+        moved = terranes.offset_line(line, 50., to_left=True)
+        self.assertEqual(len(moved), 3)
+        self.assertTrue(np.all(np.isfinite(moved)))
+
     def test_the_offset_line_lies_on_the_side_asked(self):
         line = sphere.from_lonlat(np.zeros(5), np.linspace(-20., 20., 5))   # northwards along 0 degrees
         left = terranes.offset_line(line, 100., to_left=True)
@@ -76,14 +82,16 @@ class TerraneTests(unittest.TestCase):
         events = [e for entry in snapshot.entries for e in entry.get('events', []) if e['kind'] == 'accreted']
         self.assertEqual(len(events), 1)
         self.assertEqual((events[0]['plate'], events[0]['into']), (1, 2))
-        self.assertAlmostEqual(events[0]['area_km2'], before, delta=1.)
+        # The terrane is the microcontinent and the ocean taken with it out to the trench, welded on.
+        self.assertGreater(events[0]['area_km2'], before)
+        self.assertLess(events[0]['area_km2'], 4. * before)
         world = snapshot.world
         self.assertEqual(continent_km2(world, 1), 0.)
         terrane = [f for f in snapshot.features if f.kind == 'terrane']
         self.assertEqual(len(terrane), 1)
         self.assertEqual(terrane[0].plate, 2)
-        # It was neither subducted nor collided: its area is all there, and the boundary stayed a trench.
-        self.assertAlmostEqual(terrane[0].area_km2(), before, delta=.01 * before)
+        # It was neither subducted nor collided: all of it is there, and the boundary stayed a trench.
+        self.assertAlmostEqual(terrane[0].area_km2(), events[0]['area_km2'], delta=.01 * events[0]['area_km2'])
         # Along the declared stretch near 0 degrees (its ends, beyond 50 degrees, were never declared;
         # the other boundary between the two plates, a ridge, is at the date line).
         kinds = set()

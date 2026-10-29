@@ -25,6 +25,10 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   enclosing nothing). Taking one of each two neighbouring spikes left nothing to take when every
   vertex was one, so the loop repeated unchanged for ever; a four-vertex sliver of accreted crust
   hung a history run inside `clean`. Every other spike goes instead.
+- `ContinentMesh.spread` takes one implicit (backward Euler) step instead of sub-cycling an explicit
+  one. On a world with collisions, small mesh triangles made the explicit scheme need so many
+  cycles that it took most of each step's time. The implicit step is stable for any step and keeps
+  the volume exactly, but it diffuses a little differently from the explicit one over the same time.
 - `render.draw` writes to a file object as well as a path.
 - `RegionWorld._initiate` reads the closing needed to start a trench from the world's
   `initiation_km` attribute when it has one (default `INITIATION_KM`), so a project can leave every

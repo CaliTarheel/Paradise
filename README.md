@@ -194,6 +194,23 @@ Open them all in GPlates. Each step's features show from that step's age until t
 Trenches are in `Convergent` as subduction zones, carried by the overriding plate, with
 the polarity GPlates reads as the overriding plate's side. Edits made in GPlates do not come back into Paradise.
 
+## Make maps
+
+**Make maps** draws the latest step and writes a folder beside the project file containing:
+- `elevation.png`: a hypsometric, hill-shaded map;
+- `heightmap-16bit.png`: elevation from −11,000 m to 9,000 m;
+- `rocke3d-4x5.npz` and `rocke3d-TOPO.nc`: Aerie's 72 by 46 ROCKE-3D grid, as its NPZ contract and as
+  a TOPO file in the form its studies use (all water is ocean; no lakes or land ice);
+- `maps.json`: the land share and the elevation range.
+
+How the elevation is built:
+- **Ocean** deepens with age.
+- **Continent** stands from its thickness.
+- **Orogenies, continental arcs and island arcs** are raised; trenches are deepened.
+- **Fractal noise** warps every edge and roughens high ground.
+
+It takes about half a minute at the default 1,440 pixels wide.
+
 ## Limitations
 
 - **Trenches.**
@@ -206,8 +223,8 @@ the polarity GPlates reads as the overriding plate's side. Edits made in GPlates
   - Where the plates pull apart across a trench, the new ocean is split between the two plates,
     unless you open a back-arc there.
 - **Arcs and terranes.**
-  - Arcs grow only as a band 30 km either side of the volcanic front, and render as plain
-    lowland, without volcanic relief.
+  - Arcs grow as one continuous 30 km band along each trench. The hand-built Artifexia arcs are
+    separate stretches, typically about 800 km long.
   - Whether a piece of continent accretes or collides is decided by its size, or by the pair of
     plates; you cannot choose for one piece between the same two plates.
 - **Plumes.**
@@ -216,9 +233,12 @@ the polarity GPlates reads as the overriding plate's side. Edits made in GPlates
     islands along it.
   - A LIP does not weaken its plate, so it never starts a rift by itself; declare one if you want
     one.
-- **Orogenies.**
-  - Belts are a fixed 250 km either side of a collision or suture, on continent only.
-  - They do not yet raise mountains on the map.
+- **Orogenies.** Belts are a fixed 250 km either side of a collision or suture, on continent only.
+- **Maps.**
+  - The elevation is a set of rules of thumb, not erosion: there are no river valleys or
+    sediment. Deep-Time's goSPL export could add them later.
+  - Crust thicker than 75 km counts as 75 km, and land levels off near 6 km. The core can pile
+    shortened continent into far thicker crust.
 - **Rifts.**
   - A rift splits a plate at once; there is no slow continental rifting stage before the ocean
     opens.

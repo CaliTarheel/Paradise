@@ -634,3 +634,14 @@ document.getElementById('plume-hotspot').addEventListener('click', () => stepper
 document.getElementById('plume-lip').addEventListener('click', () => stepper.declarePlume('lip', true));
 document.getElementById('plume-lip-only').addEventListener('click', () => stepper.declarePlume('lip', false));
 document.getElementById('plume-clear').addEventListener('click', () => { stepper.plume = null; stepper.plumePanel(); stepper.draw(); });
+
+document.getElementById('maps').addEventListener('click', async () => {
+  const result = await api('/api/maps', {}, 'Making maps (about half a minute)…');
+  if (!result) return;
+  document.getElementById('maps-figure').hidden = false;
+  document.getElementById('maps-image').src = result.image;
+  const m = result.summary;
+  document.getElementById('maps-caption').textContent =
+    `${fmt(m.age_ma)} Ma: ${(100 * m.land_share).toFixed(1)}% land, highest ${Math.round(m.highest_m)} m, deepest ${Math.round(m.deepest_m)} m. ` +
+    `Wrote ${result.files.join(', ')} to ${result.directory}.`;
+});

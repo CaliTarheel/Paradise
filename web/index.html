@@ -101,6 +101,7 @@
       <ol id="steps" start="0"></ol>
       <div class="row">
         <button id="export">Export to GPlates</button>
+        <button id="maps">Make maps</button>
       </div>
       <p class="hint">The project file is saved after every step.</p>
       <p id="export-result" class="hint"></p>
@@ -188,6 +189,11 @@
           <label>°/Myr <input id="new-pole-rate" type="number" value="0" step="0.05"></label>
         </div>
       </div>
+
+      <figure id="maps-figure" class="card" hidden>
+        <img id="maps-image" alt="Elevation map of the latest step">
+        <figcaption id="maps-caption" class="hint"></figcaption>
+      </figure>
 
       <div class="columns">
         <div>
