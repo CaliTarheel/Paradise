@@ -151,9 +151,10 @@ class Advisor:
             if world.time_myr >= until or child not in poles or parent not in poles:
                 del self.spreading[child]
                 continue
-            if child not in pull:   # unless a slab now pulls it, it keeps opening its rift
-                rotation = pole_vector(*poles[parent]) + away
-                poles[child] = [round(v, 4) for v in vector_pole(rotation)]
+            # It keeps opening its rift, slab or no slab: a piece of a supercontinent is ringed by
+            # its parent's trenches from the start, and pulled by them it turned back and welded again.
+            rotation = pole_vector(*poles[parent]) + away
+            poles[child] = [round(v, 4) for v in vector_pole(rotation)]
         events = self._polarity(snapshot, reasons) + self._rift(world, reasons, poles)
         rifting = {e['plate'] for e in events if e['kind'] == 'rift'}
         events += self._ridge(world, reasons, poles, rifting)
@@ -376,15 +377,23 @@ class Advisor:
 
     def remember(self, history):
         """Recover the rift clocks from a history made before this advisor existed (carrying on a run)."""
-        for snapshot in history.snapshots[1:]:
+        steps = history.project.steps
+        for k, snapshot in enumerate(history.snapshots[1:]):
+            declared = [e for e in steps[k].get('events', []) if e['kind'] == 'rift'] if k < len(steps) else []
             for e in (snapshot.entries[0].get('events', []) if snapshot.entries else []):
                 if e.get('kind') != 'rift':
                     continue
                 self.last_rift[e['new']] = snapshot.time_myr
                 if _detached(e):
                     self.last_detach[e['plate']] = snapshot.time_myr
-                else:
-                    self.last_rift[e['plate']] = snapshot.time_myr
+                    continue
+                self.last_rift[e['plate']] = snapshot.time_myr
+                # The separating rotation is what the rift's pole adds to its parent's.
+                rift = next((d for d in declared if d['plate'] == e['plate'] and 'pole' in d), None)
+                parent = steps[k]['poles'].get(str(e['plate'])) if rift else None
+                if parent is not None:
+                    self.spreading[e['new']] = (e['plate'], pole_vector(*rift['pole']) - pole_vector(*parent),
+                                                snapshot.time_myr + SEPARATION_MYR)
 
     def committed(self, snapshot):
         """Note what a committed step made: a plate made by a rift has just rifted, as has its parent."""

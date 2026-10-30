@@ -81,12 +81,18 @@ class ClockTests(unittest.TestCase):
         class History:
             pass
         h = History()
+        h.project = History()
+        h.project.steps = [dict(poles={'1': [0., 0., .2]}, events=[dict(kind='rift', plate=1, pole=[0., 0., .5])]),
+                           dict(poles={}, events=[dict(kind='detach', plate=2)])]
         h.snapshots = [None, self.snapshot(10., dict(kind='rift', plate=1, new=2, name='Plate 1 rift')),
                        self.snapshot(20., dict(kind='rift', plate=2, new=3, name='Plate 2 old ocean'))]
         a = advice.Advisor(1)
         a.remember(h)
         self.assertEqual(a.last_rift, {1: 10., 2: 10., 3: 20.})
         self.assertEqual(a.last_detach, {2: 20.})
+        parent, away, until = a.spreading[2]
+        self.assertEqual((parent, until), (1, 10. + advice.SEPARATION_MYR))
+        np.testing.assert_allclose(away, pole_vector(0., 0., .3), atol=1e-12)
 
 
 class PangaeaTests(unittest.TestCase):
