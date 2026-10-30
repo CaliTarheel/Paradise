@@ -432,8 +432,12 @@ class RegionWorld:
             area = sphere.area_km2(shape)
             if area < TINY_KM2:
                 continue
+            try:
+                local = sphere.rotate_geography(shape, back)
+            except ValueError:
+                continue   # a gain S2 cannot rebuild in the plate's frame: the ground is filled at the next rebuild
             entry['gained'][category] += area
-            mine.append(Crust(plate, 'ocean', sphere.rotate_geography(shape, back), self.time_myr + .5 * dt))
+            mine.append(Crust(plate, 'ocean', local, self.time_myr + .5 * dt))
         self.crust = others + [c for c in mine if sphere.area_km2(c.shape) >= TINY_KM2]
 
     def _thicken(self, piece, area, mine):

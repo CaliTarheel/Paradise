@@ -69,3 +69,5 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   part of the trench beside it and split it between the plates, overriding continent and all.
 - `RegionWorld._split_overlap` gives the ground to the plate bringing continent, when only one does,
   in a world with `continents_win` set (any boundary but a trench, which keeps its own rule).
+- `RegionWorld._update_crust` lets go of a gain S2 cannot rebuild in the plate's frame (the ground
+  is filled again at the next rebuild) instead of stopping the step.
