@@ -76,3 +76,5 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
 - `sphere.rotate_geography` rotates what a plate of well over half the sphere leaves out, and takes
   the rest, when that works; and `sphere.parts` and the rotation both recover an island S2 holds
   inside a hole that its WKB output leaves out (`_unwritten`).
+- `RegionWorld.step`'s continents for `continents_win` are rotated with a loose tolerance, piece by
+  piece if the whole will not go, and left out (the half-stage rule) as a last resort.

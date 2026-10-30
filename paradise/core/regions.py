@@ -215,8 +215,17 @@ class RegionWorld:
                 return None
             if plate not in continents:
                 shapes = [c.shape for c in self.crust if c.plate == plate and c.kind == 'continent']
-                continents[plate] = sphere.rotate_geography(sphere.union(*shapes), self.frame(plate), tolerance=1e-4) \
-                    if shapes else None
+                # Only where the ground goes is decided by it, so a rough rotation does: piece by
+                # piece if the whole will not go, and none at all (the half-stage rule) as a last resort.
+                try:
+                    continents[plate] = sphere.rotate_geography(sphere.union(*shapes), self.frame(plate),
+                                                                tolerance=1e-3) if shapes else None
+                except ValueError:
+                    try:
+                        continents[plate] = sphere.union(*[sphere.rotate_geography(shape, self.frame(plate),
+                                                                                   tolerance=1e-3) for shape in shapes])
+                    except ValueError:
+                        continents[plate] = None
             return continents[plate]
 
         plates = self.plates()
