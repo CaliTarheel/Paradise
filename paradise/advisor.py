@@ -25,6 +25,9 @@ The rules:
   An oceanic plate covering RIDGE_PLATE_SHARE of the sphere whose ocean is older than
   RIDGE_OCEAN_AGE_MYR on average rifts along a great circle through its point farthest from any
   continent, and the two parts move apart; slab pull then drives them into the trenches.
+- **Old passive margins collapse.** A continental plate's ocean older than OLD_OCEAN_MYR, if there
+  is OLD_OCEAN_KM2 of it, is detached as a new plate moving towards the continent, so that it goes
+  down beneath it.
 - Otherwise trenches form where plates converge (the project's automatic initiation), and a new
   pole for a plate is blended with its old one, so that motions change over a few steps.
 """
@@ -63,6 +66,11 @@ RIFT_CHANCE = .35        # per step, once a plate may rift
 # ocean plate: without it, ocean leaves only where continents run over it, and grows ever older.
 # Artifexia has 30 to 46 plates a stage: ocean plates are split far more often than one per globe.
 RIDGE_PLATE_SHARE, RIDGE_OCEAN_AGE_MYR, RIDGE_TENURE_MYR = .08, 80., 40.
+# Old passive margins collapse (Scotese IV: subduction must start somewhere). A continental plate's
+# ocean is never subducted while it is the continent's own; a run at 600 Ma had a continental plate
+# with half the sphere and ocean 300 Myr old on average. Ocean this old, this much of it, becomes a
+# plate of its own, moving towards the continent, which then overrides it.
+OLD_OCEAN_MYR, OLD_OCEAN_KM2, COLLAPSE_CM_YR = 160., 8e6, 4.
 
 
 def _cm_yr_to_rad_myr(cm_yr, axis, centre):
@@ -140,7 +148,35 @@ class Advisor:
         events = self._polarity(snapshot, reasons) + self._rift(world, reasons, poles)
         rifting = {e['plate'] for e in events if e['kind'] == 'rift'}
         events += self._ridge(world, reasons, poles, rifting)
+        rifting |= {e['plate'] for e in events if e['kind'] == 'rift'}
+        events += self._collapse(world, reasons, poles, rifting)
         return poles, events, reasons
+
+    def _collapse(self, world, reasons, poles, rifting=()) -> list:
+        """Detach the old ocean of continental plates that have much of it."""
+        events = []
+        for p in world.plates():
+            if p in rifting or world.time_myr - self.last_rift.get(p, 0.) < RIDGE_TENURE_MYR:
+                continue
+            continent = [c for c in world.crust if c.plate == p and c.kind == 'continent']
+            if sum(c.area_km2() for c in continent) < CONTINENTAL_KM2:
+                continue
+            old = [c for c in world.crust if c.plate == p and c.kind == 'ocean' and c.born_myr is not None
+                   and world.time_myr - c.born_myr >= OLD_OCEAN_MYR]
+            if sum(c.area_km2() for c in old) < OLD_OCEAN_KM2:
+                continue
+            frame = world.frame(p)
+            ocean_at = sphere.rotate(_centre(max(old, key=lambda c: c.area_km2()).shape), frame)
+            land_at = sphere.rotate(_centre(max(continent, key=lambda c: c.area_km2()).shape), frame)
+            towards = sphere.unit(land_at - np.dot(land_at, ocean_at) * ocean_at)
+            axis = sphere.unit(np.cross(ocean_at, towards))
+            rate = _cm_yr_to_rad_myr(COLLAPSE_CM_YR, axis, ocean_at)
+            parent = pole_vector(*poles[p]) if p in poles else np.zeros(3)
+            self.last_rift[p] = world.time_myr
+            reasons.append('the old ocean of plate %d is detached, to go down beneath its continent' % p)
+            events.append(dict(kind='detach', plate=p, min_age_myr=OLD_OCEAN_MYR,
+                               pole=[round(v, 4) for v in vector_pole(parent + axis * rate)]))
+        return events
 
     def _ridge(self, world, reasons, poles, rifting=()) -> list:
         """New mid-ocean ridges across old ocean plates that are due one (at most two a step)."""
@@ -207,7 +243,8 @@ class Advisor:
                 if k < n and (b.kinds[k], b.overriding[k]) == (b.kinds[start], b.overriding[start]):
                     continue
                 kind, current = b.kinds[start], b.overriding[start]
-                wrong = (kind == 'trench' and current != over) or kind == 'converging'
+                # A collision with an oceanic plate (a terrane brought it) is a trench again.
+                wrong = (kind == 'trench' and current != over) or kind in ('converging', 'collision')
                 if wrong and k - start >= 3:
                     lon, lat = sphere.to_lonlat(b.points[start:k + 1])
                     events.append(dict(kind='subduction', plates=[b.left, b.right], overriding=over,

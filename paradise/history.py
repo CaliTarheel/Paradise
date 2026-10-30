@@ -362,6 +362,10 @@ def _split(world, event, vectors, cratons, features, rifts):
         piece = rifting.rift_piece(world, plate, event['points'], event['new_side'])
         line = sphere.from_lonlat(*np.asarray(event['points'], float).T)
         return rifting.split_off(world, plate, piece, full, 'Plate %d rift' % plate, cratons, features, rifts, line)
+    if event['kind'] == 'detach':
+        plate = event['plate']
+        piece = rifting.old_ocean_piece(world, plate, event['min_age_myr'])
+        return rifting.split_off(world, plate, piece, full, 'Plate %d old ocean' % plate, cratons, features, rifts)
     over = event['overriding']
     piece = rifting.backarc_piece(world, event['points'], event['plates'], over)
     return rifting.split_off(world, over, piece, full, 'Plate %d forearc' % over, cratons, features, rifts)

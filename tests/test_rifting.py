@@ -114,6 +114,18 @@ class RiftTests(unittest.TestCase):
             self.assertEqual(len(failed), 1)   # the last step, after the weld
             self.assertEqual(len(active), 1)   # the step it opened
 
+    def test_old_ocean_detaches_from_its_plate(self):
+        project = Project('test', *with_a_continent(), start_age_ma=1000., ocean_age_myr=200.)
+        history = History(project)
+        snapshot = history.commit({}, events=[dict(kind='detach', plate=1, min_age_myr=150., pole=[0., 0., .3])])
+        world = snapshot.world
+        self.assertEqual(world.plates(), [1, 2, 3, 4, 5])
+        self.assertEqual(world.parents[5], 1)
+        # All the old ocean went; the continent and its plate stayed.
+        self.assertEqual(sum(c.area_km2() for c in world.crust if c.plate == 5 and c.kind == 'continent'), 0.)
+        self.assertGreater(continent_km2(world, 1), 0.)
+        self.assertGreater(sphere.area_km2(world.regions[5]), 1e7)
+
 
 class BackArcTests(unittest.TestCase):
     def test_a_backarc_rolls_back_and_opens_ocean_on_the_overriding_side(self):

@@ -168,8 +168,10 @@ class CollisionTests(unittest.TestCase):
         kinds = set()
         for _ in range(4):
             kinds |= {e['kind'] for entry in history.commit({1: EAST}).entries for e in entry.get('events', [])}
-        self.assertIn('collision', kinds)
-        self.assertNotIn('suture', kinds)   # plate 2 is ocean: subduction goes on (Scotese IV)
+        # Plate 2 is oceanic: the continent reaching its trench makes no collision, and nothing welds;
+        # subduction goes on (Scotese IV).
+        self.assertNotIn('collision', kinds)
+        self.assertNotIn('suture', kinds)
         self.assertTrue({1, 2} <= set(history.current.world.plates()))
 
     def test_plates_kept_apart_collide_without_welding(self):

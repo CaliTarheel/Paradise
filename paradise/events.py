@@ -18,6 +18,8 @@ Two more declarations split a plate (paradise.rifting), and may give the new pla
   as drawn) becomes a new plate.
 - `backarc`: behind a stretch of trench, the band of the overriding plate out to the arc and a
   little beyond becomes a new plate, which can roll back towards the trench.
+- `detach`: a plate's ocean older than `min_age_myr` becomes a new plate. An old passive margin
+  collapses this way: moved towards the continent, the old ocean goes down beneath it.
 
 And three decide whether two plates that collide become one (the core welds them once their
 collision has closed SUTURE_KM):
@@ -44,10 +46,10 @@ from paradise.core.topology import segment_motion
 REACH_KM = 60.
 KINDS = ('subduction', 'end_subduction', 'rift', 'backarc', 'weld', 'keep_apart', 'allow_weld',
          'no_accretion', 'allow_accretion',
-         'hotspot', 'end_hotspot', 'lip')
+         'hotspot', 'end_hotspot', 'lip', 'detach')
 PLUMES = ('hotspot', 'end_hotspot', 'lip')   # paradise.plumes, applied by the history
 PAIRS = ('weld', 'keep_apart', 'allow_weld', 'no_accretion', 'allow_accretion')   # about two plates, not a stretch
-SPLITS = ('rift', 'backarc')
+SPLITS = ('rift', 'backarc', 'detach')
 # A plate carried by a slab moves fast (Scotese's first rule of thumb): below this at its trench,
 # the downgoing plate's motion is worth a second look.
 SLOW_SLAB_CM_YR = 2.
@@ -80,6 +82,11 @@ def validate(event: dict) -> dict:
         return result
     if kind == 'end_hotspot':
         return dict(kind=kind, hotspot=int(event['hotspot']))
+    if kind == 'detach':
+        result = dict(kind=kind, plate=int(event['plate']), min_age_myr=float(event['min_age_myr']))
+        if pole is not None:
+            result['pole'] = pole
+        return result
     if kind == 'rift':
         points = [[float(lon), float(lat)] for lon, lat in event.get('points', [])]
         if len(points) < 2:

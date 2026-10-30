@@ -112,6 +112,21 @@ def _split_by_piece(boundaries, plate, new, piece):
     return result
 
 
+def old_ocean_piece(world, plate: int, min_age_myr: float):
+    """The largest connected stretch of `plate`'s ocean older than `min_age_myr`, in the world frame."""
+    if plate not in world.regions:
+        raise ValueError('there is no plate %d now' % plate)
+    old = [c.shape for c in world.crust if c.plate == plate and c.kind == 'ocean' and c.born_myr is not None
+           and world.time_myr - c.born_myr >= min_age_myr]
+    if not old:
+        raise ValueError('plate %d has no ocean %.0f Myr old' % (plate, min_age_myr))
+    shape = sphere.rotate_geography(sphere.union(*old), world.frame(plate), tolerance=1e-4)
+    parts, _ = sphere.parts(sphere.intersection(shape, world.regions[plate]))
+    if not parts:
+        raise ValueError('plate %d has no ocean %.0f Myr old' % (plate, min_age_myr))
+    return max(parts, key=sphere.area_km2)
+
+
 def split_off(world, plate: int, piece, rotations: dict, name: str, cratons: list, features: list,
               rifts: list, line=None) -> tuple:
     """Make `piece` (world frame) of `plate` a new plate; returns (new plate, cratons, event).

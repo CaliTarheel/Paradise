@@ -917,7 +917,16 @@ class RegionWorld:
             if kinds[start] == 'converging' and closed_here >= threshold:
                 middle = (start + k) // 2
                 left, right = self._sides(b, middle)
-                if left == 'continent' and right == 'continent':
+                if left == 'continent' and right == 'continent' and getattr(self, 'weld_continents_only', False) \
+                        and not (self._continental(b.left) and self._continental(b.right)):
+                    # Continent on both sides, but one plate is oceanic (a terrane on it): a trench,
+                    # with the more continental plate over it, not a collision that would never weld.
+                    over = max((b.left, b.right), key=self._continent_share)
+                    for j in run:
+                        b.kinds[j], b.overriding[j] = 'trench', over
+                    events.append(dict(kind='subduction_initiated', plates=(b.left, b.right), overriding=over,
+                                       closed_km=float(np.mean(b.closed_km[start:k]))))
+                elif left == 'continent' and right == 'continent':
                     for j in run:
                         b.kinds[j], b.overriding[j] = 'collision', None
                     events.append(dict(kind='collision', plates=(b.left, b.right), closed_km=float(np.mean(b.closed_km[start:k]))))
@@ -942,6 +951,15 @@ class RegionWorld:
             start = k
         return events
 
+    def _continent_share(self, plate) -> float:
+        if plate not in self.regions:
+            return 0.
+        return sum(c.area_km2() for c in self.crust if c.plate == plate and c.kind == 'continent') \
+            / max(sphere.area_km2(self.regions[plate]), 1.)
+
+    def _continental(self, plate) -> bool:
+        return self._continent_share(plate) >= CONTINENTAL_SHARE
+
     def _collide(self, point, area, plate) -> list:
         """Trench segments where continent arrived (>= COLLISION_KM2 this step) become collision."""
         if area < COLLISION_KM2:
@@ -949,6 +967,9 @@ class RegionWorld:
         for b in self.boundaries:
             if plate not in (b.left, b.right):
                 continue
+            if getattr(self, 'weld_continents_only', False) and not (
+                    self._continental(b.left) and self._continental(b.right)):
+                continue   # a terrane on an oceanic plate does not stop subduction (Scotese IV)
             mids = b.mids()
             near = (sphere.arc_km(mids, point[None]) < 500.) & np.array([k == 'trench' for k in b.kinds])
             if near.any():

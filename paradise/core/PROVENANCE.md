@@ -40,7 +40,9 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   core's own rule looks 150 km either side, which on a continent's passive margin finds ocean on
   both and often sent the continental plate down.
 - `RegionWorld._sutures` welds only two continental plates when the world sets
-  `weld_continents_only`. An ocean plate that had picked up an accreted terrane otherwise welded to
+  `weld_continents_only`, and with it neither `_collide` nor `_initiate` makes a collision unless
+  both plates are continental: a terrane reaching a trench on an oceanic plate made a collision that
+  could never weld, and ocean then went as compression instead of down the trench. An ocean plate that had picked up an accreted terrane otherwise welded to
   every continental plate it met, and one run welded the whole world into a single plate.
 - `RegionWorld` reads two more world attributes when they are set, for rigid continents as the
   hand-built Artifexia project has them (its continental area never shrinks, and colliding
