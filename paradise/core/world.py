@@ -440,7 +440,7 @@ class World:
 AGE_BAND_MYR = 10.
 
 
-def _merge_bands(crust):
+def _merge_bands(crust, band_myr=AGE_BAND_MYR):
     """Join each plate's ocean pieces made in the same AGE_BAND_MYR band into one piece.
 
     A piece per step would grow without bound; GPlates likewise keeps ocean floor as polygons between
@@ -451,7 +451,7 @@ def _merge_bands(crust):
         if piece.kind != 'ocean' or piece.born_myr is None:
             result.append(piece)
             continue
-        bands.setdefault((piece.plate, int(np.floor(piece.born_myr / AGE_BAND_MYR))), []).append(piece)
+        bands.setdefault((piece.plate, int(np.floor(piece.born_myr / band_myr))), []).append(piece)
     for (plate, _), pieces in sorted(bands.items()):
         if len(pieces) == 1:
             result.append(pieces[0])

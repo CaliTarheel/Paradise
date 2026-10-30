@@ -45,6 +45,7 @@ TINY_KM2 = 1e-6     # areas below this are numerical
 CHECK_TOLERANCE = 1e-4  # of the sphere's area, per step (0.01%)
 CRUMB_KM2 = 100.        # detached bits of a plate smaller than this are left with it
 SUTURE_KM = 100.        # a collision that has closed this far welds its two plates into one
+CONTINENTAL_SHARE = .3  # with `continents_override`, a plate this much continent is a continental plate
 SIMPLIFY_KM2 = 100.     # a boundary vertex cutting off less than this with its neighbours is dropped
 SIMPLIFY_EVERY_MYR = 1. # outlines are simplified once this much time has passed, not every sub-step
 SIMPLIFY_GROWTH = 1.25  # or sooner, once the outlines have this many times the vertices they had after
@@ -259,7 +260,9 @@ class RegionWorld:
                 gained[nearest].append((piece, 'junction'))
         for p in plates:
             self._update_crust(p, lost[p], gained[p], entry, dt)
-        self.crust = _merge_bands(self.crust)
+        # A world may keep coarser age bands (`age_band_myr`): a hand-built reconstruction's isochrons
+        # are its stages, 50 Myr apart in Artifexia.
+        self.crust = _merge_bands(self.crust, getattr(self, 'age_band_myr', AGE_BAND_MYR))
         self._spread(dt)  # thick crust flows outward under its own weight
         # Pieces still below the level of detail after merging (a gain with no band of its own to
         # join, a sliver left on its own) are not tracked: booked as a sliver and let go. The ground
@@ -447,9 +450,10 @@ class RegionWorld:
         A sub-step's share would be a ribbon metres wide, below the level of detail, so it is owed
         and delivered as a band ESCAPE_STEP_KM wide along the coast within reach when enough is owed.
         """
-        if ESCAPE_FRACTION <= 0.:
+        fraction = getattr(self, 'escape_fraction', ESCAPE_FRACTION)   # a world may set its own (0: none)
+        if fraction <= 0.:
             return
-        piece.escape_km2 = getattr(piece, 'escape_km2', 0.) + ESCAPE_FRACTION * shortened_km2
+        piece.escape_km2 = getattr(piece, 'escape_km2', 0.) + fraction * shortened_km2
         mesh = getattr(piece, 'mesh', None)
         lost = getattr(mesh, 'lost_nodes', None)
         if mesh is None or lost is None or not len(lost):
@@ -855,7 +859,7 @@ class RegionWorld:
         for b in self.boundaries:
             for lo, hi in _runs_of(b.kinds, 'collision'):
                 closed = float(np.mean(b.closed_km[lo:hi]))
-                if closed < SUTURE_KM:
+                if closed < getattr(self, 'suture_km', SUTURE_KM):   # a world may weld sooner
                     continue
                 left, right = into.get(b.left, b.left), into.get(b.right, b.right)
                 if left == right or left not in self.regions or right not in self.regions:
@@ -863,6 +867,14 @@ class RegionWorld:
                 # A world may name pairs of plates that collide without ever welding (`kept_apart`).
                 if frozenset((left, right)) in getattr(self, 'kept_apart', ()):
                     continue
+                # And may weld only continental plates (`weld_continents_only`, Scotese's rule IV:
+                # only a big continent-continent collision stops subduction). An ocean plate that
+                # had picked up an accreted terrane otherwise welded to every continent it met.
+                if getattr(self, 'weld_continents_only', False):
+                    share = [sum(c.area_km2() for c in self.crust if c.plate == p and c.kind == 'continent')
+                             / max(sphere.area_km2(self.regions[p]), 1.) for p in (left, right)]
+                    if min(share) < CONTINENTAL_SHARE:
+                        continue
                 keep, gone = sorted((left, right), key=lambda p: -sphere.area_km2(self.regions[p]))
                 area = sphere.area_km2(self.regions[gone])
                 sutures = getattr(self, 'sutures', [])
@@ -893,8 +905,16 @@ class RegionWorld:
             if kinds[k] == kinds[start]:
                 continue
             run = range(start, k)
-            # A world may set its own threshold (`initiation_km`): infinity leaves every trench to be declared.
-            if kinds[start] == 'converging' and np.mean(b.closed_km[start:k]) >= getattr(self, 'initiation_km', INITIATION_KM):
+            # A world may set its own threshold (`initiation_km`): infinity leaves every trench to be
+            # declared. Continents meeting become a collision at the world's `suture_km` instead, when
+            # it sets one: rigid continents stop where they touch, as hand-built reconstructions do.
+            closed_here = np.mean(b.closed_km[start:k]) if kinds[start] == 'converging' else 0.
+            threshold = getattr(self, 'initiation_km', INITIATION_KM)
+            if kinds[start] == 'converging' and hasattr(self, 'suture_km') and closed_here >= self.suture_km:
+                middle = (start + k) // 2
+                if self._sides(b, middle) == ['continent', 'continent']:
+                    threshold = self.suture_km
+            if kinds[start] == 'converging' and closed_here >= threshold:
                 middle = (start + k) // 2
                 left, right = self._sides(b, middle)
                 if left == 'continent' and right == 'continent':
@@ -906,6 +926,14 @@ class RegionWorld:
                         over = b.left if left == 'continent' else b.right
                     else:
                         over = b.left if self._age(b, middle, b.left) < self._age(b, middle, b.right) else b.right
+                    # A world may say that a continental plate (CONTINENTAL_SHARE of it continent or
+                    # more) always overrides an oceanic one, however far its continent is from the
+                    # boundary (`continents_override`): Worldbuilding Pasta's rule for its start.
+                    if getattr(self, 'continents_override', False):
+                        share = {p: sum(c.area_km2() for c in self.crust if c.plate == p and c.kind == 'continent')
+                                 / max(sphere.area_km2(self.regions[p]), 1.) for p in (b.left, b.right)}
+                        if (share[b.left] >= CONTINENTAL_SHARE) != (share[b.right] >= CONTINENTAL_SHARE):
+                            over = b.left if share[b.left] > share[b.right] else b.right
                     for j in run:
                         b.kinds[j], b.overriding[j] = 'trench', over
                     events.append(dict(kind='subduction_initiated', plates=(b.left, b.right), overriding=over,

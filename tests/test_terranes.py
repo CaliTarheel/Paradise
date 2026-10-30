@@ -160,6 +160,18 @@ class CollisionTests(unittest.TestCase):
         self.assertIn('suture', kinds)
         self.assertEqual(len({1, 2} & set(history.current.world.plates())), 1)
 
+    def test_an_oceanic_plate_does_not_weld_when_only_continents_weld(self):
+        project = world_with_a_microcontinent()
+        project.terrane_max_km2, project.weld_continents_only = 0., True
+        history = History(project)
+        history.commit({1: EAST}, events=[TRENCH])
+        kinds = set()
+        for _ in range(4):
+            kinds |= {e['kind'] for entry in history.commit({1: EAST}).entries for e in entry.get('events', [])}
+        self.assertIn('collision', kinds)
+        self.assertNotIn('suture', kinds)   # plate 2 is ocean: subduction goes on (Scotese IV)
+        self.assertTrue({1, 2} <= set(history.current.world.plates()))
+
     def test_plates_kept_apart_collide_without_welding(self):
         history, kinds = self.run_until_collided([dict(kind='keep_apart', plates=[1, 2])])
         self.assertIn('collision', kinds)

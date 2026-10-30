@@ -36,6 +36,9 @@ STEP_MYR = 10.
 # times the cost, and are not worth it for a worldbuilding history. A fast plate therefore moves a
 # few hundred km in one sub-step, and accepts the coarser splitting that comes with it.
 SUBSTEP_MYR = 2.5
+# With rigid continents, colliding continents weld once they have closed this far: about one
+# sub-step's contact, so they meet and stop instead of pushing a hundred km into each other.
+RIGID_SUTURE_KM = 5.
 SPEED_LIMIT_CM_YR = 20.
 
 
@@ -114,6 +117,16 @@ class Project:
     # Whether a converging boundary becomes a trench by itself once it has closed INITIATION_KM.
     # Without it, every trench is declared (paradise.events).
     auto_trenches: bool = True
+    # Whether a trench starting between a continental and an oceanic plate always has the continental
+    # one overriding (Worldbuilding Pasta's rule for its starting plates).
+    continents_override: bool = False
+    # Whether only two continental plates weld when they collide (Scotese's rule IV).
+    weld_continents_only: bool = False
+    # Whether continents are rigid, as in a hand-built reconstruction: they weld where they touch
+    # instead of shortening into each other, and nothing escapes sideways along their coasts.
+    rigid_continents: bool = False
+    # How many Myr of ocean floor each ocean crust piece spans (its isochrons are this far apart).
+    ocean_band_myr: float = 10.
     # The largest continental piece that accretes as a terrane instead of colliding (0: none do).
     terrane_max_km2: float = terranes.TERRANE_MAX_KM2
 
@@ -121,6 +134,8 @@ class Project:
     def to_json(self) -> dict:
         return dict(format='paradise-project', version=1, name=self.name, start_age_ma=self.start_age_ma,
                     step_myr=self.step_myr, ocean_age_myr=self.ocean_age_myr, auto_trenches=self.auto_trenches,
+                    continents_override=self.continents_override, weld_continents_only=self.weld_continents_only,
+                    rigid_continents=self.rigid_continents, ocean_band_myr=self.ocean_band_myr,
                     terrane_max_km2=self.terrane_max_km2,
                     plate_names={str(k): v for k, v in self.plate_names.items()},
                     plates=encode_grid(self.plates), crust=encode_grid(self.crust), steps=self.steps)
@@ -134,6 +149,10 @@ class Project:
                    float(data.get('ocean_age_myr', 60.)),
                    {int(k): v for k, v in data.get('plate_names', {}).items()}, list(data.get('steps', [])),
                    bool(data.get('auto_trenches', True)),
+                   bool(data.get('continents_override', False)),
+                   bool(data.get('weld_continents_only', False)),
+                   bool(data.get('rigid_continents', False)),
+                   float(data.get('ocean_band_myr', 10.)),
                    float(data.get('terrane_max_km2', terranes.TERRANE_MAX_KM2)))
 
     def save(self, path):
@@ -150,7 +169,7 @@ class Project:
         return self.start_age_ma - time_myr
 
 
-CACHE_VERSION = 7
+CACHE_VERSION = 9
 
 
 class History:
@@ -181,7 +200,8 @@ class History:
         """What snapshot `k` depends on: the painting, the settings and the first `k` steps."""
         p = self.project
         digest = hashlib.sha256()
-        digest.update(json.dumps([CACHE_VERSION, SUBSTEP_MYR, p.step_myr, p.ocean_age_myr, p.auto_trenches, p.terrane_max_km2,
+        digest.update(json.dumps([CACHE_VERSION, SUBSTEP_MYR, p.step_myr, p.ocean_age_myr, p.auto_trenches, p.continents_override, p.weld_continents_only, p.rigid_continents, p.ocean_band_myr,
+                                  p.terrane_max_km2,
                                   list(p.plates.shape)]).encode())
         digest.update(np.ascontiguousarray(p.plates, np.int64).tobytes())
         digest.update(np.ascontiguousarray(p.crust, np.int64).tobytes())
@@ -237,6 +257,11 @@ class History:
         world = copy.deepcopy(before.world)
         world.initiation_km = INITIATION_KM if self.project.auto_trenches else math.inf
         world.terrane_max_km2 = self.project.terrane_max_km2
+        world.continents_override = self.project.continents_override
+        world.weld_continents_only = self.project.weld_continents_only
+        world.age_band_myr = self.project.ocean_band_myr
+        if self.project.rigid_continents:
+            world.suture_km, world.escape_fraction = RIGID_SUTURE_KM, 0.
         cratons = list(before.cratons)
         features = copy.deepcopy(before.features)
         vectors = {int(p): pole_vector(*pole) for p, pole in poles.items()}

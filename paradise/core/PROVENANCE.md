@@ -35,6 +35,21 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   its area; before, it was skipped, and a result missing a whole hole's worth was accepted. And the
   loop-by-loop rebuild counts the polygon's holes when it decides whether a shell loop is really an
   inner loop, since such a shell is larger than the polygon by its other holes.
+- `RegionWorld._initiate` lets a world with `continents_override` set put a continental plate
+  (`CONTINENTAL_SHARE` continent or more) over an oceanic one when a trench starts between them. The
+  core's own rule looks 150 km either side, which on a continent's passive margin finds ocean on
+  both and often sent the continental plate down.
+- `RegionWorld._sutures` welds only two continental plates when the world sets
+  `weld_continents_only`. An ocean plate that had picked up an accreted terrane otherwise welded to
+  every continental plate it met, and one run welded the whole world into a single plate.
+- `RegionWorld` reads two more world attributes when they are set, for rigid continents as the
+  hand-built Artifexia project has them (its continental area never shrinks, and colliding
+  continents meet without overlapping): `suture_km`, the closing after which a collision welds
+  (and after which converging continents become a collision), and `escape_fraction`, the share of
+  shortened continent that escapes sideways as bands along the coast (0: none).
+- `RegionWorld.step` merges ocean into age bands of the world's `age_band_myr` when it has one
+  (default `AGE_BAND_MYR`, 10 Myr). Bands 10 Myr apart made a thousand-Myr history carry five
+  times the vertices of the hand-built Artifexia project, whose isochrons are its 50 Myr stages.
 - `render.draw` writes to a file object as well as a path.
 - `RegionWorld._initiate` reads the closing needed to start a trench from the world's
   `initiation_km` attribute when it has one (default `INITIATION_KM`), so a project can leave every
