@@ -336,6 +336,14 @@ def tidy(world, features: list) -> list:
     """Features kept to their plate's continental crust, and moved with crust whose plate has gone."""
     plates = set(world.plates())
     result = []
+    continents = {}   # plate -> union of its continental crust, worked out once (it was once a feature)
+
+    def continent_of(plate):
+        if plate not in continents:
+            shapes = [c.shape for c in world.crust if c.plate == plate and c.kind == 'continent']
+            continents[plate] = sphere.union(*shapes) if shapes else None
+        return continents[plate]
+
     for f in features:
         if f.plate not in plates:
             # The plate was absorbed: the feature goes to the plate now under its middle.
@@ -355,8 +363,8 @@ def tidy(world, features: list) -> list:
             f.shape = sphere.rotate_geography(here, frame.T, tolerance=1e-4) if not sphere.is_empty(here) else sphere.EMPTY
         else:
             # Every other feature lies on continental crust; whatever of it is no longer there has gone.
-            continent = [c.shape for c in world.crust if c.plate == f.plate and c.kind == 'continent']
-            f.shape = sphere.intersection(f.shape, sphere.union(*continent)) if continent else sphere.EMPTY
+            continent = continent_of(f.plate)
+            f.shape = sphere.intersection(f.shape, continent) if continent is not None else sphere.EMPTY
         if f.area_km2() >= ARC_MIN_KM2:
             result.append(f)
     return result
