@@ -225,6 +225,17 @@ class PinchedShellPlateTests(unittest.TestCase):
         self.assertAlmostEqual(sum(sphere.area_km2(p) for p in pieces) / sphere.area_km2(geography), 1., places=5)
 
 
+class MostOfTheSpherePlateTests(unittest.TestCase):
+    def test_a_plate_of_most_of_the_sphere_rotates_with_its_area(self):
+        """A plate of 410 Mkm2 whose rings, rotated, were read back as nearly nothing; what it leaves
+        out is rotated instead. The fixture is the plate as a thousand-Myr run met it."""
+        import pickle
+        with open(Path(__file__).parent / 'fixtures' / 'most_of_the_sphere_plate.pkl', 'rb') as f:
+            geography, matrix = pickle.load(f)
+        moved = sphere.rotate_geography(geography, matrix)
+        self.assertAlmostEqual(sphere.area_km2(moved) / sphere.area_km2(geography), 1., places=6)
+
+
 class IslandInAHoleTests(unittest.TestCase):
     def test_an_island_the_rings_leave_out_is_kept(self):
         """S2 holds an island of 24,000 km2 inside one of this plate's holes that its WKB output leaves
