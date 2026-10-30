@@ -73,3 +73,6 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   is filled again at the next rebuild) instead of stopping the step.
 - `sphere.part` counts a shell's own inner loops with the holes when deciding, loop by loop, which
   loop is the shell: a plate of more than half the sphere pinched round one was cut away whole.
+- `sphere.rotate_geography` rotates what a plate of well over half the sphere leaves out, and takes
+  the rest, when that works; and `sphere.parts` and the rotation both recover an island S2 holds
+  inside a hole that its WKB output leaves out (`_unwritten`).

@@ -535,6 +535,12 @@ def parts(geography, minimum_km2=1e-6):
         dropped += lost
         if not is_empty(piece):
             result.append(piece)
+    for piece in _unwritten(geography, result, dropped):
+        touching = [k for k, r in enumerate(result) if spherely.distance(r, piece) == 0.]
+        if touching:
+            result[touching[0]] = union(result[touching[0]], piece)
+        else:
+            result.append(piece)
     error = sum(area_km2(piece) for piece in result) + dropped - whole
     if abs(error) > allowed_change(whole):
         raise ValueError('Splitting into polygons changed the area by %.3g km2.' % error)
@@ -569,16 +575,63 @@ def clean(geography, minimum_km2=1e-6):
 
 def rotate_geography(geography, matrix, tolerance=None):
     """The same polygons rotated by `matrix` (rings keep their orientation)."""
-    pieces, dropped = [], 0.
     whole = area_km2(geography)
     if whole > SPHERE_KM2 - allowed_change(SPHERE_KM2, tolerance):
         return _full()  # the whole sphere (a plate that is all there is), which S2 writes as one point
+    if whole > .55 * SPHERE_KM2:
+        # Well over half the sphere (at half, what is left out is as hard to read the right way out
+        # as the plate): what it leaves out is smaller and, written as rings, nothing
+        # like as hard to read back (no shell near half the sphere, read inside out, or pinched
+        # round its holes), so that is what is rotated. The thousand-Myr runs met plates of 260
+        # and 410 Mkm2 that could not be rotated as themselves.
+        try:
+            rest = _rotate_rings(difference(_full(), geography), matrix, tolerance)
+            result = difference(_full(), rest)
+            if abs(area_km2(result) - whole) <= allowed_change(whole, tolerance):
+                return result
+        except ValueError:
+            pass
+    return _rotate_rings(geography, matrix, tolerance)
+
+
+def _unwritten(geography, pieces, dropped):
+    """The parts of `geography` that its rings, rebuilt as `pieces`, leave out.
+
+    S2 can hold an island inside one of a polygon's holes that its WKB output leaves out (a plate
+    of 139 Mkm2 lost one of 24,000 km2 that way); S2 itself gives the difference, which is simple
+    enough to write out on its own.
+    """
+    whole = area_km2(geography)
+    if abs(sum(area_km2(p) for p in pieces) + dropped - whole) <= allowed_change(whole):
+        return []
+    missing = difference(geography, union(*pieces) if pieces else EMPTY)
+    if area_km2(missing) <= allowed_change(whole):
+        return []
+    found = []
+    for rings in polygons(missing):
+        piece, _ = part(rings, whole_km2=area_km2(missing))
+        if not is_empty(piece):
+            found.append(piece)
+    return found
+
+
+def _rotate_rings(geography, matrix, tolerance=None):
+    pieces, dropped = [], 0.
+    whole = area_km2(geography)
+    if is_empty(geography):
+        return EMPTY
     for rings in polygons(geography):
         piece, lost = part([rotate(ring, matrix) for ring in rings], whole_km2=whole)
         dropped += lost
         if not is_empty(piece):
             pieces.append(piece)
     result = union(*pieces) if pieces else EMPTY
+    if abs(area_km2(result) + dropped - whole) > allowed_change(whole, tolerance):
+        # Short: perhaps an island the rings left out (`_unwritten`), carried on its own.
+        written = [part(rings, whole_km2=whole)[0] for rings in polygons(geography)]
+        missing = _unwritten(geography, [w for w in written if not is_empty(w)], 0.)
+        if missing:
+            result = union(result, *[_rotate_rings(m, matrix, tolerance) for m in missing])
     # Rebuilding moves the outline where S2's own output does not survive longitude and latitude
     # (tiny holes, edges that nearly touch); allow 1e-5 of the shape (1,000 km2 on a 100 Mkm2
     # plate), a hundred times inside the 0.1% standard, and refuse anything more.
