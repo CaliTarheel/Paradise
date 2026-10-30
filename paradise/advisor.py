@@ -63,7 +63,10 @@ STAGE_STEPS = 5
 RIFT_CONTINENT_KM2 = 10e6   # Artifexia's continents are mostly 10 to 50 million km2
 RIFT_TENURE_MYR = 60.      # Artifexia's continents split every 50 to 100 Myr
 RIFT_CHANCE = .35        # per step, once a plate may rift
-RIFT_TRIES = 6           # directions tried for a rift that opens wherever it crosses the continent
+RIFT_TRIES = 12          # directions tried for a rift that opens wherever it crosses the continent
+RIDGE_CLEAR_KM = 300.     # a new ridge on a plate with a continent keeps this far from it
+RIDGE_CAP_MIN_KM, RIDGE_CAP_MAX_KM = 800., 2500.   # the radius of ocean that comes away instead
+RIFT_LAND_KM2 = 2e6       # land a rift is opened across (smaller pieces may close)
 CIRCLE_STEP_DEG = .5     # the rift's great circle is looked at every 55 km
 CROSSING_KM = 100.       # and crosses land wherever it comes this near it
 # A large ocean plate splits along a new mid-ocean ridge, as a Pasta world adds ridges to its one
@@ -80,6 +83,30 @@ OLD_OCEAN_MYR, OLD_OCEAN_KM2, COLLAPSE_CM_YR = 160., 8e6, 4.
 def _detached(event) -> bool:
     """Whether a rift event is a plate's old ocean detached (rifting.split_off names the new plate)."""
     return event.get('name', '').endswith('old ocean')
+
+
+def _main_land(land):
+    """The bodies of a continent a rift must open across: those of RIFT_LAND_KM2 or more.
+
+    A supercontinent's plate gathers terranes and islands all round it; every great circle met one
+    of them on its closing half, and the 127 Mkm2 supercontinent of the Pangaea run never rifted.
+    A small piece on that half goes down the trench it meets, as such pieces do.
+    """
+    try:
+        pieces, _ = sphere.parts(land)
+    except ValueError:
+        return land
+    main = [p for p in pieces if sphere.area_km2(p) >= RIFT_LAND_KM2]
+    return sphere.union(*main) if main else land
+
+
+def _clear_of(land, centre, heading) -> float:
+    """How near (km) the great circle through `centre` along `heading` comes to `land`."""
+    around = np.radians(np.arange(0., 360., CIRCLE_STEP_DEG))
+    points = np.outer(np.cos(around), centre) + np.outer(np.sin(around), heading)
+    lon, lat = sphere.to_lonlat(points)
+    near = np.asarray(spherely.distance(spherely.points(lon, lat), land))
+    return float(near.min()) * sphere.RADIUS_KM / spherely.EARTH_RADIUS_METERS
 
 
 def _opening_axis(land, centre, heading):
@@ -228,11 +255,12 @@ class Advisor:
 
     def _ridge(self, world, reasons, poles, rifting=()) -> list:
         """New mid-ocean ridges across old ocean plates that are due one (at most two a step)."""
-        shares = self._shares(world)
         due = []
         for p in world.plates():
-            area = sphere.area_km2(world.regions[p])
-            if shares[p] >= .1 or area < RIDGE_PLATE_SHARE * sphere.SPHERE_KM2:
+            # A plate with a continent is due one too when it has the ocean for one: the plate of a
+            # supercontinent with its ocean held 300 Mkm2 of ocean and never had a new ridge.
+            area = sum(c.area_km2() for c in world.crust if c.plate == p and c.kind == 'ocean')
+            if area < RIDGE_PLATE_SHARE * sphere.SPHERE_KM2:
                 continue
             if world.time_myr - self.last_rift.get(p, 0.) < RIDGE_TENURE_MYR:
                 continue
@@ -258,16 +286,38 @@ class Advisor:
             return []
         land = np.vstack(land)
         far = trial[int(np.argmin(np.max(trial @ land.T, axis=1)))]
-        heading = sphere.unit(np.cross(far, sphere.unit(self.rng.normal(size=3))))
-        circle = [sphere.unit(far * math.cos(t) + heading * math.sin(t)) for t in np.linspace(-math.pi, math.pi, 73)]
+        own = [c.shape for c in world.crust if c.plate == plate and c.kind == 'continent']
+        own = _main_land(sphere.rotate_geography(sphere.union(*own), world.frame(plate), tolerance=1e-4)) if own else None
+        for _ in range(RIFT_TRIES):
+            heading = sphere.unit(np.cross(far, sphere.unit(self.rng.normal(size=3))))
+            circle = [sphere.unit(far * math.cos(t) + heading * math.sin(t)) for t in np.linspace(-math.pi, math.pi, 73)]
+            # A ridge goes through ocean: on a plate with a continent, round a circle clear of it.
+            if own is None or _clear_of(own, far, heading) >= RIDGE_CLEAR_KM:
+                side = sphere.unit(np.cross(far, heading))             # left of the line, along the sphere
+                away = sphere.unit(np.cross(far, side))
+                break
+        else:
+            # No great circle misses the continents (a supercontinent's pieces strewn round its
+            # plate): the ocean round the point farthest from them comes away as a plate of its
+            # own instead, a ridge opening behind it and a trench ahead.
+            far_lon, far_lat = sphere.to_lonlat(far[None])
+            clear = float(spherely.distance(spherely.create_point(float(far_lon[0]), float(far_lat[0])), own)) \
+                * sphere.RADIUS_KM / spherely.EARTH_RADIUS_METERS - RIDGE_CLEAR_KM
+            if clear < RIDGE_CAP_MIN_KM:
+                return []
+            radius = min(clear, RIDGE_CAP_MAX_KM) / sphere.RADIUS_KM
+            east = sphere.unit(np.cross([0., 0., 1.], far) if abs(far[2]) < .99 else np.cross([1., 0., 0.], far))
+            north = np.cross(far, east)
+            t = np.linspace(0., 2. * math.pi, 73)
+            circle = [sphere.unit(math.cos(radius) * far + math.sin(radius) * (math.cos(a) * east + math.sin(a) * north))
+                      for a in t]   # anticlockwise seen from outside: the cap is on its left
+            away = sphere.unit(np.cross(far, sphere.unit(self.rng.normal(size=3))))   # an axis square to it
         lon, lat = sphere.to_lonlat(np.array(circle))
-        side = sphere.unit(np.cross(far, heading))             # left of the line, along the sphere
-        away = np.cross(far, side)
-        rate = _cm_yr_to_rad_myr(4., sphere.unit(away), far)
+        rate = _cm_yr_to_rad_myr(4., away, far)
         parent = pole_vector(*poles[plate]) if plate in poles else np.zeros(3)
         self.pending[plate] = sphere.unit(away) * rate
         self.last_rift[plate] = world.time_myr
-        reasons.append('a new ridge splits ocean plate %d' % plate)
+        reasons.append('a new ridge splits the ocean of plate %d' % plate)
         return [dict(kind='rift', plate=plate, points=[[round(float(a), 3), round(float(b), 3)] for a, b in zip(lon, lat)],
                      new_side='left', pole=[round(v, 4) for v in vector_pole(parent + sphere.unit(away) * rate)])]
 
@@ -397,8 +447,8 @@ class Advisor:
             heading = sphere.unit(points[-1] - points[0])
             headings.append(sphere.unit(heading - np.dot(heading, centre) * centre))
         headings += [sphere.unit(np.cross(centre, sphere.unit(self.rng.normal(size=3)))) for _ in range(RIFT_TRIES)]
-        land = sphere.rotate_geography(sphere.union(*[c.shape for c in continent]), world.frame(plate),
-                                       tolerance=1e-4)
+        land = _main_land(sphere.rotate_geography(sphere.union(*[c.shape for c in continent]), world.frame(plate),
+                                                  tolerance=1e-4))
         for heading in headings:
             axis = _opening_axis(land, centre, heading)
             if axis is not None:
