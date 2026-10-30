@@ -51,10 +51,15 @@ def main():
                           continents_override=True, weld_continents_only=True, rigid_continents=True,
                           ocean_band_myr=50.)
     t = time.time()
-    history = History(project)
+    cache = args.project + '.cache'
+    history = History(project, cache if os.path.exists(cache) else None)
     print('ready at %.0f Ma in %.0f s: %s' % (project.age_ma(history.current.time_myr), time.time() - t,
                                              summary(history.current)), flush=True)
-    advisor = Advisor(args.seed, rift_at_start=True)
+    advisor = Advisor(args.seed, rift_at_start=not project.steps)
+    if project.steps:
+        # Carrying on: the advisor's memory of rifts is not saved, so every plate counts as just
+        # rifted, rather than all rifting at once.
+        advisor.last_rift = {p: history.current.time_myr for p in history.current.world.plates()}
     while len(project.steps) < args.steps:
         poles, events, reasons = advisor.propose(history)
         t = time.time()

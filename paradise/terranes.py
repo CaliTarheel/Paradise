@@ -177,12 +177,24 @@ def grow_arcs(world, trenches: list, before: list, features: list, time_myr: flo
 # ----------------------------------------------------------------------------------------- terranes
 def accrete(world, features: list, rotations: dict, dt: float) -> list:
     """Hand terranes about to reach a trench to the overriding plate; returns 'accreted' events."""
+    import copy
     events = []
     for _ in range(8):   # each accretion changes the boundaries, so look again until none is left
         found = _next_accretion(world, features, rotations, dt)
         if found is None:
             break
-        events.append(_transfer(world, features, rotations, *found))
+        # All or nothing: rebuilding the plates after a transfer can trip the core's checks (a
+        # sliver where the accreted crust meets its new plate), and a half-made transfer would
+        # spoil the whole step. Undone, the terrane simply waits, or goes down with its plate.
+        saved = (copy.deepcopy(world.crust), dict(world.regions), copy.deepcopy(world.boundaries),
+                 copy.deepcopy(features))
+        try:
+            events.append(_transfer(world, features, rotations, *found))
+        except (ValueError, RuntimeError) as e:
+            world.crust, world.regions, world.boundaries = saved[0], saved[1], saved[2]
+            features[:] = saved[3]
+            events.append(dict(kind='accretion_failed', plate=found[3], into=found[2], text=str(e)))
+            break
     return events
 
 
