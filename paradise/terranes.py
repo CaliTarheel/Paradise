@@ -371,9 +371,25 @@ def tidy(world, features: list) -> list:
             here = sphere.intersection(sphere.rotate_geography(f.shape, frame, tolerance=1e-4), world.regions[f.plate])
             f.shape = sphere.rotate_geography(here, frame.T, tolerance=1e-4) if not sphere.is_empty(here) else sphere.EMPTY
         else:
-            # Every other feature lies on continental crust; whatever of it is no longer there has gone.
+            # Every other feature lies on continental crust; whatever of it is no longer there has gone,
+            # unless the crust went to another plate (the core passes pieces between plates), when the
+            # feature goes with it.
+            before = f.area_km2()
             continent = continent_of(f.plate)
-            f.shape = sphere.intersection(f.shape, continent) if continent is not None else sphere.EMPTY
+            kept = sphere.intersection(f.shape, continent) if continent is not None else sphere.EMPTY
+            if sphere.area_km2(kept) < .5 * before:
+                world_shape = sphere.rotate_geography(f.shape, world.frame(f.plate), tolerance=1e-4)
+                best, best_km2 = None, sphere.area_km2(kept)
+                for p in plates:
+                    if p == f.plate or continent_of(p) is None:
+                        continue
+                    here = sphere.intersection(sphere.rotate_geography(world_shape, world.frame(p).T, tolerance=1e-4),
+                                               continent_of(p))
+                    if sphere.area_km2(here) > best_km2:
+                        best, best_km2 = (p, here), sphere.area_km2(here)
+                if best is not None:
+                    f.plate, kept = best
+            f.shape = kept
         if f.area_km2() >= ARC_MIN_KM2:
             result.append(f)
     return result
