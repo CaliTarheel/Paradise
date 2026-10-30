@@ -71,3 +71,5 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   in a world with `continents_win` set (any boundary but a trench, which keeps its own rule).
 - `RegionWorld._update_crust` lets go of a gain S2 cannot rebuild in the plate's frame (the ground
   is filled again at the next rebuild) instead of stopping the step.
+- `sphere.part` counts a shell's own inner loops with the holes when deciding, loop by loop, which
+  loop is the shell: a plate of more than half the sphere pinched round one was cut away whole.

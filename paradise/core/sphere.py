@@ -496,6 +496,10 @@ def part(rings, minimum_km2=1e-6, whole_km2=None):
     # written as one hole's boundary, enclosing all but that hole: larger than the polygon by its
     # other holes, which can be whole plates.)
     holes_km2 = sum(abs(loop_area_km2(loop)) for hole in rings[1:] for loop in simple_loops(hole))
+    # The shell's own inner loops (where it pinches round a hole) count as holes too: a plate of 260
+    # Mkm2 whose shell of 307 pinched round 22 of them was otherwise read as all inner loop, and lost.
+    shell_km2 = sorted(abs(loop_area_km2(loop)) for loop in loops)
+    holes_km2 += sum(shell_km2[:-1])
     limit = SPHERE_KM2 if whole_km2 is None else max(.5 * SPHERE_KM2, 1.01 * (whole_km2 + holes_km2) + 1.)
     cuts = []
     for k, ring in enumerate(rings):

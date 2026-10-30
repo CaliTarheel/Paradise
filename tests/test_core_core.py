@@ -211,3 +211,15 @@ class HalfSpherePlateTests(unittest.TestCase):
             geography, matrix, tolerance = pickle.load(f)
         moved = sphere.rotate_geography(geography, matrix, tolerance)
         self.assertAlmostEqual(sphere.area_km2(moved) / sphere.area_km2(geography), 1., places=5)
+
+
+class PinchedShellPlateTests(unittest.TestCase):
+    def test_a_plate_whose_shell_pinches_round_a_hole_splits_with_its_area(self):
+        """A plate of 261 Mkm2, more than half the sphere: its shell of 307 pinches round an inner
+        loop of 22. Rebuilt loop by loop, the shell was taken for an inner loop and the whole plate
+        cut away. The fixture is the plate as a thousand-Myr run met it, pickled as S2 had it."""
+        import pickle
+        with open(Path(__file__).parent / 'fixtures' / 'pinched_shell_plate.pkl', 'rb') as f:
+            geography = pickle.load(f)
+        pieces, dropped = sphere.parts(geography)
+        self.assertAlmostEqual(sum(sphere.area_km2(p) for p in pieces) / sphere.area_km2(geography), 1., places=5)
