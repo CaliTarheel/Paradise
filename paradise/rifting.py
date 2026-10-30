@@ -50,9 +50,19 @@ def rift_piece(world, plate: int, points, new_side: str):
         raise ValueError('there is no plate %d now' % plate)
     line = densify(sphere.from_lonlat(*np.asarray(points, float).T), spacing_km=50.)
     region = world.regions[plate]
+    sign = 1. if new_side == 'left' else -1.
+    if len(line) > 3 and sphere.arc_km(line[0], line[-1]) < 1.:
+        # A closed line (a patch of ocean coming away): the new plate is what it encloses on the
+        # named side. Cut as a strip, the strip filled the ring and its inside was lost.
+        ring = line[:-1] if sign > 0 else line[:-1][::-1]
+        inside = sphere.polygon_robust(ring)
+        piece = sphere.intersection(region, inside)
+        if sphere.area_km2(piece) < WRAPPED_SHARE * sphere.area_km2(region) or sphere.is_empty(
+                sphere.difference(region, piece)):
+            raise ValueError('the closed line must enclose part of plate %d, not all of it' % plate)
+        return piece
     rest = sphere.difference(region, sphere.strip(line, CUT_KM))
     parts, _ = sphere.parts(rest)
-    sign = 1. if new_side == 'left' else -1.
     chosen = [p for p in parts if sign * _side(line, _centre(p)) > 0.]
     kept = [p for p in parts if sign * _side(line, _centre(p)) <= 0.]
     whole = sphere.area_km2(region)

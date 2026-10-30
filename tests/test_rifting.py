@@ -76,6 +76,19 @@ class RiftTests(unittest.TestCase):
         # The east of the line is new, as far as the great circle goes round the back.
         self.assertGreater(sphere.area_km2(world.regions[new]), .4 * sphere.SPHERE_KM2)
 
+    def test_a_closed_line_cuts_out_what_it_encloses(self):
+        # A ring of 1,500 km round 30 W on the equator, inside plate 1 (west of 0, 60 S to 60 N).
+        centre, east, north = sphere.from_lonlat(-30., 0.), sphere.from_lonlat(60., 0.), np.array([0., 0., 1.])
+        a = 1500. / sphere.RADIUS_KM
+        t = np.linspace(0., 2. * np.pi, 49)
+        ring = np.cos(a) * centre + np.sin(a) * (np.outer(np.cos(t), east) + np.outer(np.sin(t), north))
+        lon, lat = sphere.to_lonlat(ring)
+        snapshot = History(self.project).commit({}, events=[dict(kind='rift', plate=1, new_side='left',
+                                                                 points=np.column_stack((lon, lat)).tolist())])
+        new = max(snapshot.world.plates())
+        self.assertEqual(new, 5)
+        self.assertAlmostEqual(sphere.area_km2(snapshot.world.regions[new]) / (np.pi * 1500. ** 2), 1., delta=.05)
+
     def test_a_line_that_does_not_cross_the_plate_is_refused(self):
         history = History(self.project)
         snapshot = history.preview({}, [dict(kind='rift', plate=1, points=[[-100., 10.], [-80., 10.]], new_side='left')])
