@@ -46,5 +46,26 @@ class RigidCollisionTests(unittest.TestCase):
         self.assertLess(after, .99 * before)
 
 
+class ContinentalMarginTests(unittest.TestCase):
+    def margin_closing(self, rigid):
+        """Plate 1's continent reaches the boundary along 0 degrees; ocean plate 2 closes on it untrenched."""
+        plates, crust = four_plates()
+        lon, lat = grid_lonlat()
+        crust[(lon > -30.) & (lon < 0.) & (np.abs(lat) < 40.)] = 1
+        history = History(Project('test', plates, crust, start_age_ma=1000., auto_trenches=False,
+                                  rigid_continents=rigid))
+        before = continent_km2(history.current.world)
+        history.commit({2: [90., 0., -.5]})
+        return before, continent_km2(history.current.world)
+
+    def test_rigid_continents_keep_a_margin_the_ocean_closes_on(self):
+        before, after = self.margin_closing(rigid=True)
+        self.assertGreater(after, .995 * before)
+
+    def test_otherwise_the_margin_takes_half_the_overlap(self):
+        before, after = self.margin_closing(rigid=False)
+        self.assertLess(after, .99 * before)
+
+
 if __name__ == '__main__':
     unittest.main()

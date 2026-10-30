@@ -207,6 +207,18 @@ class RegionWorld:
                 stage_cache[key] = sphere.rotate_geography(old_regions[plate], sphere.rotation(mean), tolerance=1e-4)
             return stage_cache[key]
 
+        continents = {}
+
+        def continent(plate):
+            """`plate`'s continent where it has moved to, when the world keeps continents whole."""
+            if not getattr(self, 'continents_win', False):
+                return None
+            if plate not in continents:
+                shapes = [c.shape for c in self.crust if c.plate == plate and c.kind == 'continent']
+                continents[plate] = sphere.rotate_geography(sphere.union(*shapes), self.frame(plate), tolerance=1e-4) \
+                    if shapes else None
+            return continents[plate]
+
         plates = self.plates()
         reach = {}
         for p in plates:
@@ -224,14 +236,17 @@ class RegionWorld:
                     continue
                 before = len(lost[p]), len(lost[q])
                 remaining = overlap
-                for zone, kind, over in runs.get((p, q), []):
+                # Zones are as wide as both plates' reach, so a run's zone spills over its neighbours'
+                # ground: a trench's overlap read as the ridge beside it is split between the plates,
+                # and the overriding continent loses its share. Converging runs claim theirs first.
+                for zone, kind, over in sorted(runs.get((p, q), []), key=lambda run: _CLAIM_ORDER.get(run[1], 3)):
                     local = sphere.intersection(remaining, zone)
                     if sphere.area_km2(local) < TINY_KM2:
                         continue
                     remaining = sphere.difference(remaining, local)
-                    self._split_overlap(local, kind, over, p, q, stage, lost)
+                    self._split_overlap(local, kind, over, p, q, stage, lost, continent)
                 if sphere.area_km2(remaining) >= TINY_KM2:
-                    self._split_overlap(remaining, 'junction', None, p, q, stage, lost)
+                    self._split_overlap(remaining, 'junction', None, p, q, stage, lost, continent)
                 for plate, start in zip((p, q), before):
                     given = [shape for shape, _ in lost[plate][start:]]
                     if given:
@@ -659,11 +674,22 @@ class RegionWorld:
                 (mids, list(b.kinds), list(b.overriding), np.asarray(b.closed_km, float), np.asarray(idents)))
         return index
 
-    def _split_overlap(self, local, kind, over, p, q, stage, lost):
+    def _split_overlap(self, local, kind, over, p, q, stage, lost, continent=lambda plate: None):
         if kind == 'trench' and over in (p, q):
             lost[q if over == p else p].append((local, 'trench'))
             return
         mine = sphere.intersection(local, stage((p, q), p))
+        # A world may keep continents whole (`continents_win`): where only one plate brings continent
+        # to the overlap, by any boundary but a trench, the other plate's ocean gives way. Split along
+        # the half-stage line, a continental margin newly converging with the ocean beside it lost
+        # half the overlap, and a Pangaea's margins wore away as fast as its oceans closed.
+        cp, cq = continent(p), continent(q)
+        if cp is not None:
+            here = sphere.intersection(local, cp)
+            mine = sphere.union(mine, sphere.difference(here, cq) if cq is not None else here)
+        if cq is not None:
+            here = sphere.intersection(local, cq)
+            mine = sphere.difference(mine, sphere.difference(here, cp) if cp is not None else here)
         lost[p].append((sphere.difference(local, mine), kind))
         lost[q].append((mine, kind))
 
@@ -1028,6 +1054,9 @@ class RegionWorld:
                              ('balance_error_km2', 'Crust created and destroyed do not balance')):
             if abs(entry[key]) > scale:
                 raise ValueError('%s: %.3g km2 off.' % (message, entry[key]))
+
+
+_CLAIM_ORDER = dict(trench=0, collision=1, converging=2)
 
 
 def _loss_category(boundary_kind, crust_kind):

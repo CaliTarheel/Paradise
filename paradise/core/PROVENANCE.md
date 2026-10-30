@@ -64,3 +64,8 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   trench to be declared.
 - `RegionWorld._sutures` leaves alone any pair of plates in the world's `kept_apart` set, when it
   has one, so a person can let two plates collide without welding them.
+- `RegionWorld.step` resolves a pair's overlap run by run with converging runs first (trench, then
+  collision, then converging). The zones are as wide as both plates' reach, so a ridge's zone took
+  part of the trench beside it and split it between the plates, overriding continent and all.
+- `RegionWorld._split_overlap` gives the ground to the plate bringing continent, when only one does,
+  in a world with `continents_win` set (any boundary but a trench, which keeps its own rule).

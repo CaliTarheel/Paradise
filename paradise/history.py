@@ -169,7 +169,7 @@ class Project:
         return self.start_age_ma - time_myr
 
 
-CACHE_VERSION = 9
+CACHE_VERSION = 10
 
 
 class History:
@@ -262,6 +262,7 @@ class History:
         world.age_band_myr = self.project.ocean_band_myr
         if self.project.rigid_continents:
             world.suture_km, world.escape_fraction = RIGID_SUTURE_KM, 0.
+        world.continents_win = self.project.rigid_continents
         cratons = list(before.cratons)
         features = copy.deepcopy(before.features)
         vectors = {int(p): pole_vector(*pole) for p, pole in poles.items()}
