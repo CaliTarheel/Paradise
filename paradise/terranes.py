@@ -341,6 +341,22 @@ def _transfer(world, features, rotations, part, distance, over, down, others) ->
 
 
 # ------------------------------------------------------------------------------------------ keeping
+MAX_FEATURE_VERTICES = 2000   # an arc or terrane outline with more is cleaned however it came by them
+
+
+def _vertices(shape) -> int:
+    return sum(len(ring) for rings in sphere.polygons(shape) for ring in rings)
+
+
+def _tidied(shape):
+    """A clipped feature without the debris and zero-length edges clipping leaves.
+
+    Clipped to its continent every sub-step, a terrane of 0.09 Mkm2 had gathered 89,000 vertices
+    and two hundred specks, and clipping it once took S2 200 s.
+    """
+    return sphere.clean(shape, minimum_km2=sphere.DETAIL_KM2)[0]
+
+
 def tidy(world, features: list) -> list:
     """Features kept to their plate's continental crust, and moved with crust whose plate has gone."""
     plates = set(world.plates())
@@ -351,9 +367,23 @@ def tidy(world, features: list) -> list:
         if plate not in continents:
             shapes = [c.shape for c in world.crust if c.plate == plate and c.kind == 'continent']
             continents[plate] = sphere.union(*shapes) if shapes else None
+            if continents[plate] is not None:
+                # Indexed once for the cheap tests below: most features lie wholly on their plate's
+                # continent, and clipping each one to a continent of a hundred Mkm2 took most of a step.
+                spherely.prepare(continents[plate])
         return continents[plate]
 
+    regions = {}
+
+    def region_of(plate):
+        if plate not in regions:
+            regions[plate] = world.regions[plate]
+            spherely.prepare(regions[plate])
+        return regions[plate]
+
     for f in features:
+        if _vertices(f.shape) > MAX_FEATURE_VERTICES:
+            f.shape = _tidied(f.shape)
         if f.plate not in plates:
             # The plate was absorbed: the feature goes to the plate now under its middle.
             world_shape = sphere.rotate_geography(f.shape, world.frames.get(f.plate, np.eye(3)), tolerance=1e-4)
@@ -368,23 +398,31 @@ def tidy(world, features: list) -> list:
             # (gone down a trench, say) has gone.
             # Clipped in the world frame: the arc is small, its plate may be most of the sphere.
             frame = world.frame(f.plate)
-            here = sphere.intersection(sphere.rotate_geography(f.shape, frame, tolerance=1e-4), world.regions[f.plate])
-            f.shape = sphere.rotate_geography(here, frame.T, tolerance=1e-4) if not sphere.is_empty(here) else sphere.EMPTY
+            moved = sphere.rotate_geography(f.shape, frame, tolerance=1e-4)
+            if not spherely.covers(region_of(f.plate), moved):
+                here = sphere.intersection(moved, world.regions[f.plate])
+                f.shape = _tidied(sphere.rotate_geography(here, frame.T, tolerance=1e-4)) \
+                    if not sphere.is_empty(here) else sphere.EMPTY
         else:
             # Every other feature lies on continental crust; whatever of it is no longer there has gone,
             # unless the crust went to another plate (the core passes pieces between plates), when the
             # feature goes with it.
             before = f.area_km2()
             continent = continent_of(f.plate)
-            kept = sphere.intersection(f.shape, continent) if continent is not None else sphere.EMPTY
+            if continent is not None and spherely.covers(continent, f.shape):
+                kept = f.shape
+            else:
+                kept = _tidied(sphere.intersection(f.shape, continent)) if continent is not None else sphere.EMPTY
             if sphere.area_km2(kept) < .5 * before:
                 world_shape = sphere.rotate_geography(f.shape, world.frame(f.plate), tolerance=1e-4)
                 best, best_km2 = None, sphere.area_km2(kept)
                 for p in plates:
                     if p == f.plate or continent_of(p) is None:
                         continue
-                    here = sphere.intersection(sphere.rotate_geography(world_shape, world.frame(p).T, tolerance=1e-4),
-                                               continent_of(p))
+                    local = sphere.rotate_geography(world_shape, world.frame(p).T, tolerance=1e-4)
+                    if not spherely.intersects(continent_of(p), local):
+                        continue
+                    here = _tidied(sphere.intersection(local, continent_of(p)))
                     if sphere.area_km2(here) > best_km2:
                         best, best_km2 = (p, here), sphere.area_km2(here)
                 if best is not None:
@@ -392,4 +430,6 @@ def tidy(world, features: list) -> list:
             f.shape = kept
         if f.area_km2() >= ARC_MIN_KM2:
             result.append(f)
+    for region in regions.values():
+        spherely.destroy_prepared(region)   # the world's own regions, as they were
     return result
