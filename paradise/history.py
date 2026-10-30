@@ -308,7 +308,8 @@ class History:
             rotations = _rotations(world, vectors)
             sub = min(remaining, SUBSTEP_MYR)
             # Rigid continents about to touch weld where they are, before the core can overlap them.
-            welded = collide.weld_on_approach(world, rotations, sub) if self.project.rigid_continents else []
+            welded = collide.weld_on_approach(world, rotations, sub, rifts) \
+                if self.project.rigid_continents else []
             if welded:
                 rotations = _rotations(world, vectors)
             # Terranes about to reach a trench join the overriding plate before the core can collide them.

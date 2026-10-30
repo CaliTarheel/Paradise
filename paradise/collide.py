@@ -25,11 +25,25 @@ MIN_CLOSING_CM_YR = .1
 # Nor is a contact shorter than this: a kink in a new rift's boundary, beside the cut, where the
 # pieces' continents still touch, welded them again in the step they rifted.
 MIN_CONTACT_KM = 100.
+RIFTED_MYR = 30.   # a pair that rifted apart this lately is not welded here
 
 
-def weld_on_approach(world, rotations: dict, dt: float) -> list:
-    """Weld every pair of continental plates whose continents will touch within `dt`; returns events."""
+def weld_on_approach(world, rotations: dict, dt: float, rifts=()) -> list:
+    """Weld every pair of continental plates whose continents will touch within `dt`; returns events.
+
+    `rifts` (paradise.rifting's records) names pairs that rifted apart lately: never welded here.
+    """
     continents = {}
+    # A rift's new boundary is rebuilt from crust cut along it, with pockets a hundred km across
+    # jutting out square to it; along their flanks the opening reads as closing, and the pieces
+    # welded again in the step they rifted. A pair that rifted lately is moving apart by design.
+    apart = set()
+    for r in rifts:
+        if world.time_myr - r['time_myr'] < RIFTED_MYR:
+            apart.add(frozenset((r['plate'], r['new'])))
+
+    def rifted(a, b):
+        return any(frozenset((x, y)) in apart for x in (a, world.parents.get(a)) for y in (b, world.parents.get(b)))
 
     def continent(plate):
         if plate not in continents:
@@ -42,7 +56,7 @@ def weld_on_approach(world, rotations: dict, dt: float) -> list:
     for b in world.boundaries:
         if len(b.points) < 2 or not (world._continental(b.left) and world._continental(b.right)):
             continue
-        if frozenset((b.left, b.right)) in getattr(world, 'kept_apart', ()):
+        if frozenset((b.left, b.right)) in getattr(world, 'kept_apart', ()) or rifted(b.left, b.right):
             continue
         opening, _ = segment_motion(b.points, rotations.get(b.left, np.zeros(3)), rotations.get(b.right, np.zeros(3)))
         closing = np.maximum(-opening, 0.) * dt
