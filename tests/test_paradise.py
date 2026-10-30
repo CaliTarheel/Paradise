@@ -238,6 +238,17 @@ class ExportTests(unittest.TestCase):
             divergent = pygplates.FeatureCollection(os.path.join(directory, 'Divergent.gpml'))
             self.assertGreater(len(divergent), 0)
 
+    def test_a_feature_unchanged_from_step_to_step_is_written_once(self):
+        plates, crust = three_plates()
+        history = History(Project('test', plates, crust, start_age_ma=1000.))
+        for _ in range(3):
+            history.commit({})   # nothing moves: every piece stays as painted
+        continents = gplates.layers(history)['Continents']
+        self.assertEqual(len(continents), 1)
+        begin, end = continents[0].get_valid_time()
+        self.assertEqual(begin, 1000.)
+        self.assertLess(end, 970. + 1e-2)
+
     def test_a_declared_trench_exports_with_its_polarity(self):
         project = Project('test', *four_plates(), start_age_ma=1000., auto_trenches=False)
         history = History(project)

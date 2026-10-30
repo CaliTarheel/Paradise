@@ -140,6 +140,42 @@ def _hotspots(history, out):
                                         project.age_ma(h['born_myr']), end))
 
 
+def _signature(feature) -> tuple:
+    """What a feature is, but for when: its type, name, plate, description and geometry."""
+    rings = []
+    for geometry in feature.get_all_geometries():
+        if isinstance(geometry, pygplates.PolygonOnSphere):
+            parts = [geometry.get_exterior_ring_points()] + [
+                geometry.get_interior_ring_points(k) for k in range(geometry.get_number_of_interior_rings())]
+        elif isinstance(geometry, pygplates.PointOnSphere):
+            parts = [[geometry]]
+        else:
+            parts = [geometry.get_points()]
+        for part in parts:
+            rings.append(np.round(np.array([q.to_lat_lon() for q in part], float), 5).tobytes())
+    return (feature.get_feature_type().to_qualified_string(), feature.get_name(), feature.get_reconstruction_plate_id(),
+            feature.get_description(), tuple(rings))
+
+
+def _merged(features) -> list:
+    """The features with each run of identical step snapshots written once, for the run's whole time.
+
+    A piece of crust is the same in its plate's frame from one step to the next until something cuts
+    it; written once a step, the thousand-Myr export came to 1.1 GB, against Artifexia's few MB.
+    """
+    result, open_runs = [], {}
+    for feature in features:
+        begin, end = feature.get_valid_time()
+        key = _signature(feature)
+        run = open_runs.get(key)
+        if run is not None and abs(run.get_valid_time()[1] - begin) < .01:
+            run.set_valid_time(run.get_valid_time()[0], end)
+            continue
+        open_runs[key] = feature
+        result.append(feature)
+    return result
+
+
 def layers(history) -> dict:
     """{layer file name: [features]} for the whole history."""
     out = {name: [] for name in ('Plates', 'Continents', 'Cratons', 'Island arcs', 'Continental arcs',
@@ -152,13 +188,13 @@ def layers(history) -> dict:
         for plate in world.plates():
             back = world.frame(plate).T
             for polygon in _polygons(world.regions[plate], back):
-                out['Plates'].append(_feature('UnclassifiedFeature', polygon, 'plate %d step %d' % (plate, k),
+                out['Plates'].append(_feature('UnclassifiedFeature', polygon, 'plate %d' % plate,
                                               plate, begin, end))
         for c in world.crust:
             # Crust is stored in its plate's frame already.
             for polygon in _polygons(c.shape, np.eye(3)):
                 if c.kind == 'continent':
-                    out['Continents'].append(_feature('ContinentalCrust', polygon, 'continent step %d' % k,
+                    out['Continents'].append(_feature('ContinentalCrust', polygon, 'continent',
                                                       c.plate, begin, end,
                                                       'thickness %.1f km' % c.thickness_km))
                 else:
@@ -202,7 +238,7 @@ def layers(history) -> dict:
                 feature_type, layer = BOUNDARY_TYPES.get(kind, ('UnclassifiedFeature', 'Transform'))
                 back = world.frame(plate).T
                 geometry = pygplates.PolylineOnSphere(_points_on_sphere(sphere.rotate(line, back)))
-                feature = _feature(feature_type, geometry, '%s %d-%d step %d' % (kind, b.left, b.right, k),
+                feature = _feature(feature_type, geometry, '%s %d-%d' % (kind, b.left, b.right),
                                    plate, begin, end)
                 if kind in ('ridge', 'transform'):
                     feature.set_left_plate(b.left)
@@ -215,7 +251,7 @@ def layers(history) -> dict:
                                             'Left' if plate == b.left else 'Right')
                 out[layer].append(feature)
     _hotspots(history, out)
-    return out
+    return {name: _merged(features) for name, features in out.items()}
 
 
 FEATURE_LAYERS = {
