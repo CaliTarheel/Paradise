@@ -59,6 +59,34 @@ class AdvisorTests(unittest.TestCase):
             self.assertNotEqual(e['overriding'], 1)
 
 
+def cap(lon, lat, radius_km):
+    centre = sphere.from_lonlat(lon, lat)
+    east = sphere.unit(np.cross([0., 0., 1.], centre))
+    north = np.cross(centre, east)
+    a = radius_km / sphere.RADIUS_KM
+    t = np.linspace(0., 2. * np.pi, 72, endpoint=False)
+    return sphere.polygon(np.cos(a) * centre + np.sin(a) * (np.outer(np.cos(t), east) + np.outer(np.sin(t), north)))
+
+
+class OpeningAxisTests(unittest.TestCase):
+    def test_a_rift_opens_wherever_it_crosses_the_continent(self):
+        import math
+        # Two continents on the equator's great circle, 100 degrees apart: the rift along it must
+        # open across both, so its pole goes in the 260 degrees of ocean.
+        land = sphere.union(*[cap(lon, 0., 1500.) for lon in (0., 100.)])
+        centre, heading = sphere.from_lonlat(0., 0.), sphere.from_lonlat(90., 0.)
+        axis = advice._opening_axis(land, centre, heading)
+        side = np.cross(centre, heading)
+        for lon in np.arange(-13., 114., 1.):
+            point = sphere.from_lonlat(lon, 0.)
+            self.assertGreater(np.dot(np.cross(axis, point), side), 0., lon)
+        self.assertAlmostEqual(float(np.dot(axis, side)), 0.)
+
+    def test_none_when_the_continent_spans_more_than_half_the_circle(self):
+        land = sphere.union(*[cap(lon, 0., 1500.) for lon in (0., 100., -100.)])
+        self.assertIsNone(advice._opening_axis(land, sphere.from_lonlat(0., 0.), sphere.from_lonlat(90., 0.)))
+
+
 class ClockTests(unittest.TestCase):
     def snapshot(self, time_myr, *events):
         class Snapshot:

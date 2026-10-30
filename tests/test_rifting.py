@@ -60,6 +60,22 @@ class RiftTests(unittest.TestCase):
         frames = history.current.world.frames
         np.testing.assert_allclose(frames[5], frames[1], atol=1e-12)
 
+    def test_a_long_line_round_which_the_plate_wraps_cuts_along_its_great_circle(self):
+        # Plate 1 is all but a cap round 90 E: a half great circle along 90 W, from pole to pole, has
+        # plate 1 round both its ends.
+        lon, lat = grid_lonlat()
+        plates = np.where(sphere.arc_km(sphere.from_lonlat(lon, lat), sphere.from_lonlat(90., 0.)[None, None]) < 3000.,
+                          2, 1)
+        _, crust = with_a_continent()
+        history = History(Project('test', plates, crust, start_age_ma=1000., auto_trenches=False))
+        line = [[-90., lat_] for lat_ in np.linspace(-85., 85., 18)]
+        snapshot = history.commit({}, events=[dict(kind='rift', plate=1, points=line, new_side='right')])
+        world = snapshot.world
+        self.assertEqual(len(world.plates()), 3)
+        new = max(world.plates())
+        # The east of the line is new, as far as the great circle goes round the back.
+        self.assertGreater(sphere.area_km2(world.regions[new]), .4 * sphere.SPHERE_KM2)
+
     def test_a_line_that_does_not_cross_the_plate_is_refused(self):
         history = History(self.project)
         snapshot = history.preview({}, [dict(kind='rift', plate=1, points=[[-100., 10.], [-80., 10.]], new_side='left')])

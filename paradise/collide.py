@@ -19,6 +19,12 @@ from paradise.core.topology import segment_motion
 
 _KM_PER_S2_METRE = sphere.RADIUS_KM / spherely.EARTH_RADIUS_METERS
 MARGIN_KM = 20.   # welded this far apart or less, whether or not they are converging fast
+# Slower than this is no approach: near the pole of a rift's opening the motion is next to nothing,
+# either way, and the pieces' continents still touch there.
+MIN_CLOSING_CM_YR = .1
+# Nor is a contact shorter than this: a kink in a new rift's boundary, beside the cut, where the
+# pieces' continents still touch, welded them again in the step they rifted.
+MIN_CONTACT_KM = 100.
 
 
 def weld_on_approach(world, rotations: dict, dt: float) -> list:
@@ -39,27 +45,31 @@ def weld_on_approach(world, rotations: dict, dt: float) -> list:
         if frozenset((b.left, b.right)) in getattr(world, 'kept_apart', ()):
             continue
         opening, _ = segment_motion(b.points, rotations.get(b.left, np.zeros(3)), rotations.get(b.right, np.zeros(3)))
-        lengths = sphere.arc_km(b.points[:-1], b.points[1:])
-        if float(np.dot(opening, lengths)) >= 0.:
-            continue   # opening, or sliding, on the whole: a rift just made touches both continents
-        closing = float(np.max(-opening, initial=0.)) * dt
+        closing = np.maximum(-opening, 0.) * dt
+        if not closing.any():
+            continue
         a, c = continent(b.left), continent(b.right)
         if a is None or c is None:
             continue
-        # How near the continents are to the boundary between them. At a trench it is the downgoing
-        # plate's continent that counts: it reaches the trench, and is squeezed there, long before it
-        # reaches the other, while the overriding continent sits near the trench by nature (an
-        # Andean margin), however wide the ocean still to close.
-        lon, lat = sphere.to_lonlat(b.points)
-        line = spherely.create_linestring(list(zip(lon.tolist(), lat.tolist())))
+        # Segment by segment: how near each continent is, and whether this segment closes that far
+        # this sub-step. A whole boundary can close on its far side (round the back of the sphere,
+        # from a rift's pole of opening) while the continents touch only where it opens. At a
+        # trench it is the downgoing plate's continent that counts: it reaches the trench, and is
+        # squeezed there, long before it reaches the other, while the overriding continent sits
+        # near the trench by nature (an Andean margin), however wide the ocean still to close.
+        lon, lat = sphere.to_lonlat(b.mids())
+        probes = spherely.points(lon, lat)
+        reach = closing + MARGIN_KM
         trench = [o for k, o in zip(b.kinds, b.overriding) if k == 'trench' and o in (b.left, b.right)]
         if trench and len(trench) >= len(b.kinds) / 2:
             over = max(set(trench), key=trench.count)
             down = c if over == b.left else a
-            gap = float(spherely.distance(down, line)) * _KM_PER_S2_METRE
+            near = np.asarray(spherely.distance(probes, down)) * _KM_PER_S2_METRE <= reach
         else:
-            gap = min(float(spherely.distance(a, line)), float(spherely.distance(c, line))) * _KM_PER_S2_METRE
-        if gap > closing + MARGIN_KM:
+            near = (np.asarray(spherely.distance(probes, a)) * _KM_PER_S2_METRE <= reach) & \
+                   (np.asarray(spherely.distance(probes, c)) * _KM_PER_S2_METRE <= reach)
+        meeting = near & (closing > MIN_CLOSING_CM_YR * 10. * dt)   # 1 cm/yr is 10 km/Myr
+        if float(np.sum(sphere.arc_km(b.points[:-1], b.points[1:])[meeting])) < MIN_CONTACT_KM:
             continue
         # Make the boundary a collision that has closed far enough to weld; the core does the rest.
         b.kinds = ['collision'] * len(b.kinds)

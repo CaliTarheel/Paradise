@@ -63,6 +63,8 @@ STAGE_STEPS = 5
 RIFT_CONTINENT_KM2 = 10e6   # Artifexia's continents are mostly 10 to 50 million km2
 RIFT_TENURE_MYR = 60.      # Artifexia's continents split every 50 to 100 Myr
 RIFT_CHANCE = .35        # per step, once a plate may rift
+RIFT_TRIES = 6           # directions tried for a rift that opens wherever it crosses the continent
+CIRCLE_STEP_DEG = .5     # the rift's great circle is looked at every 55 km
 # A large ocean plate splits along a new mid-ocean ridge, as a Pasta world adds ridges to its one
 # ocean plate: without it, ocean leaves only where continents run over it, and grows ever older.
 # Artifexia has 30 to 46 plates a stage: ocean plates are split far more often than one per globe.
@@ -77,6 +79,37 @@ OLD_OCEAN_MYR, OLD_OCEAN_KM2, COLLAPSE_CM_YR = 160., 8e6, 4.
 def _detached(event) -> bool:
     """Whether a rift event is a plate's old ocean detached (rifting.split_off names the new plate)."""
     return event.get('name', '').endswith('old ocean')
+
+
+def _opening_axis(land, centre, heading):
+    """The axis that opens the great circle through `centre` along `heading` wherever it crosses land.
+
+    A rotation opens a great circle on the half of it between its pole and the antipode, and closes
+    it on the other half. The pole goes on the circle in the ocean, so that every crossing of the
+    continent (`land`, a geography in the world frame) is on the opening half, and it turns the left
+    side (the new plate) away. None when the crossings span more than half the circle.
+    """
+    side = np.cross(centre, heading)
+    around = np.radians(np.arange(0., 360., CIRCLE_STEP_DEG))
+    points = np.outer(np.cos(around), centre) + np.outer(np.sin(around), heading)
+    lon, lat = sphere.to_lonlat(points)
+    on_land = np.asarray(spherely.contains(land, spherely.points(lon, lat)))
+    if not on_land.any():
+        return None
+    angles = np.sort(np.arctan2(points[on_land] @ heading, points[on_land] @ centre))
+    gaps = np.diff(np.concatenate((angles, angles[:1] + 2. * math.pi)))
+    k = int(np.argmax(gaps))
+    if gaps[k] <= math.pi:
+        return None
+    # The crossings run from angles[k + 1] round to angles[k]: the pole goes before them, by half
+    # what is left of the half circle, and its antipode as far after them.
+    first = angles[(k + 1) % len(angles)]
+    span = (angles[k] - first) % (2. * math.pi)
+    t = first - .5 * (math.pi - span)
+    pole = centre * math.cos(t) + heading * math.sin(t)
+    middle = first + .5 * span
+    probe = centre * math.cos(middle) + heading * math.sin(middle)
+    return pole if np.dot(np.cross(pole, probe), side) > 0. else -pole
 
 
 def _cm_yr_to_rad_myr(cm_yr, axis, centre):
@@ -352,35 +385,44 @@ class Advisor:
         centre = sphere.rotate(_centre(largest.shape), world.frame(plate))
         # Prefer the plate's youngest suture (Scotese XI): through its middle, along it.
         sutures = [s for s in getattr(world, 'sutures', []) if s['plate'] == plate and len(s['points']) >= 2]
+        headings = []
         if sutures:
             s = max(sutures, key=lambda s: s['time_myr'])
             points = sphere.rotate(np.asarray(s['points'], float), world.frame(plate))
             centre = sphere.unit(points[len(points) // 2])
             heading = sphere.unit(points[-1] - points[0])
-            heading = sphere.unit(heading - np.dot(heading, centre) * centre)
+            headings.append(sphere.unit(heading - np.dot(heading, centre) * centre))
+        headings += [sphere.unit(np.cross(centre, sphere.unit(self.rng.normal(size=3)))) for _ in range(RIFT_TRIES)]
+        land = sphere.rotate_geography(sphere.union(*[c.shape for c in continent]), world.frame(plate),
+                                       tolerance=1e-4)
+        for heading in headings:
+            axis = _opening_axis(land, centre, heading)
+            if axis is not None:
+                break
         else:
-            heading = sphere.unit(np.cross(centre, sphere.unit(self.rng.normal(size=3))))
-        # A half great circle through the centre, far past the plate's edges.
+            return []   # every cut tried crosses the continent round more than half its circle
+        # A half great circle through the centre, far past the plate's edges (a plate wrapping round
+        # its ends is cut along the whole circle: rifting.rift_piece).
         line = [sphere.unit(centre * math.cos(t) + heading * math.sin(t)) for t in np.linspace(-1.5, 1.5, 31)]
         lon, lat = sphere.to_lonlat(np.array(line))
-        side = sphere.unit(np.cross(centre, heading))          # left of the line, along the sphere
-        away = np.cross(centre, side)                           # turns the left side away from the line
-        rate = _cm_yr_to_rad_myr(SEPARATION_CM_YR, sphere.unit(away), centre)
+        rate = _cm_yr_to_rad_myr(SEPARATION_CM_YR, axis, centre)
         # The new plate moves with its parent and away from it: a pole of its own in absolute terms
         # let the parent catch it up, collide and weld again within the step.
         parent = pole_vector(*poles[plate]) if plate in poles else np.zeros(3)
-        self.pending[plate] = sphere.unit(away) * rate
+        self.pending[plate] = axis * rate
         self.last_rift[plate] = world.time_myr
         reasons.append('plate %d rifts (%.0f million km2 of continent)' % (plate, area / 1e6))
         return [dict(kind='rift', plate=plate, points=[[round(float(a), 3), round(float(b), 3)] for a, b in zip(lon, lat)],
-                     new_side='left', pole=[round(v, 4) for v in vector_pole(parent + sphere.unit(away) * rate)])]
+                     new_side='left', pole=[round(v, 4) for v in vector_pole(parent + axis * rate)])]
 
     def remember(self, history):
         """Recover the rift clocks from a history made before this advisor existed (carrying on a run)."""
         steps = history.project.steps
         for k, snapshot in enumerate(history.snapshots[1:]):
             declared = [e for e in steps[k].get('events', []) if e['kind'] == 'rift'] if k < len(steps) else []
-            for e in (snapshot.entries[0].get('events', []) if snapshot.entries else []):
+            for e in [e for entry in snapshot.entries for e in entry.get('events', [])]:
+                if e.get('kind') == 'plate_split':
+                    self._follow(e['new'], e['plate'], snapshot.time_myr)
                 if e.get('kind') != 'rift':
                     continue
                 self.last_rift[e['new']] = snapshot.time_myr
@@ -407,4 +449,17 @@ class Advisor:
                     if e['plate'] in self.pending:
                         self.spreading[e['new']] = (e['plate'], self.pending[e['plate']],
                                                     snapshot.time_myr + SEPARATION_MYR)
+        # A piece a plate came apart into during the step moves on with it, as it did within the
+        # step: given a motion of its own, the far piece of a rifted continent turned back and welded.
+        for entry in snapshot.entries:
+            for e in entry.get('events', []):
+                if e.get('kind') == 'plate_split':
+                    self._follow(e['new'], e['plate'], snapshot.time_myr)
         self.pending = {}
+
+    def _follow(self, piece, source, time_myr):
+        self.last_rift[piece] = time_myr
+        if source in self.spreading:
+            self.spreading[piece] = self.spreading[source]
+        else:
+            self.spreading[piece] = (source, np.zeros(3), time_myr + SEPARATION_MYR)

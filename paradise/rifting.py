@@ -55,9 +55,39 @@ def rift_piece(world, plate: int, points, new_side: str):
     sign = 1. if new_side == 'left' else -1.
     chosen = [p for p in parts if sign * _side(line, _centre(p)) > 0.]
     kept = [p for p in parts if sign * _side(line, _centre(p)) <= 0.]
-    if not chosen or not kept:
+    whole = sphere.area_km2(region)
+    if not chosen or not kept or min(sphere.area_km2(sphere.union(*chosen)), sphere.area_km2(sphere.union(*kept))) \
+            < WRAPPED_SHARE * whole:
+        # A long line that does not part the plate goes as far as a line can: the plate wraps round
+        # its ends (a supercontinent's plate with its ocean can cover most of the sphere). It is cut
+        # along the line's whole great circle. A short one was drawn short, and is refused.
+        if float(np.sum(sphere.arc_km(line[:-1], line[1:]))) >= WRAPPED_LINE_KM:
+            piece = _hemisphere_piece(region, line, sign)
+            if piece is not None:
+                return piece
         raise ValueError('the rift line must cross plate %d from one edge to another' % plate)
     return sphere.union(*chosen)
+
+
+WRAPPED_LINE_KM = 10000.   # a quarter of the way round
+WRAPPED_SHARE = .01   # a side with less of the plate than this is a sliver: the line has not parted it
+
+
+def _hemisphere_piece(region, line, sign):
+    """The part of `region` on the `sign` side of the great circle through `line`, if it parts it."""
+    normal = sphere.unit(np.sum(np.cross(line[:-1], line[1:]), axis=0)) * sign
+    u = sphere.unit(np.cross(normal, line[len(line) // 2]))
+    v = np.cross(normal, u)
+    t = np.linspace(0., 2. * np.pi, 144, endpoint=False)
+    half = sphere.polygon(np.outer(np.cos(t), u) + np.outer(np.sin(t), v))
+    lon, lat = sphere.to_lonlat(normal[None])
+    if not bool(spherely.contains(half, spherely.create_point(float(lon[0]), float(lat[0])))):
+        half = sphere.difference(sphere._full(), half)
+    piece = sphere.intersection(region, half)
+    area, whole = sphere.area_km2(piece), sphere.area_km2(region)
+    if area < WRAPPED_SHARE * whole or area > (1. - WRAPPED_SHARE) * whole:
+        return None
+    return piece
 
 
 def backarc_piece(world, trench_points, plates, overriding: int):
