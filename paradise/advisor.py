@@ -65,6 +65,7 @@ RIFT_TENURE_MYR = 60.      # Artifexia's continents split every 50 to 100 Myr
 RIFT_CHANCE = .35        # per step, once a plate may rift
 RIFT_TRIES = 6           # directions tried for a rift that opens wherever it crosses the continent
 CIRCLE_STEP_DEG = .5     # the rift's great circle is looked at every 55 km
+CROSSING_KM = 100.       # and crosses land wherever it comes this near it
 # A large ocean plate splits along a new mid-ocean ridge, as a Pasta world adds ridges to its one
 # ocean plate: without it, ocean leaves only where continents run over it, and grows ever older.
 # Artifexia has 30 to 46 plates a stage: ocean plates are split far more often than one per globe.
@@ -93,7 +94,10 @@ def _opening_axis(land, centre, heading):
     around = np.radians(np.arange(0., 360., CIRCLE_STEP_DEG))
     points = np.outer(np.cos(around), centre) + np.outer(np.sin(around), heading)
     lon, lat = sphere.to_lonlat(points)
-    on_land = np.asarray(spherely.contains(land, spherely.points(lon, lat)))
+    # Near land counts: a coast running along the circle, or a neck of land between two samples,
+    # still meets it, and closing there welded the pieces again.
+    near = np.asarray(spherely.distance(spherely.points(lon, lat), land)) * sphere.RADIUS_KM / spherely.EARTH_RADIUS_METERS
+    on_land = near <= CROSSING_KM
     if not on_land.any():
         return None
     angles = np.sort(np.arctan2(points[on_land] @ heading, points[on_land] @ centre))
