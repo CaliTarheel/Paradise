@@ -35,6 +35,9 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
   its area; before, it was skipped, and a result missing a whole hole's worth was accepted. And the
   loop-by-loop rebuild counts the polygon's holes when it decides whether a shell loop is really an
   inner loop, since such a shell is larger than the polygon by its other holes.
+- `sphere.part` checks S2's result for a shell loop near half the sphere too, taking that loop's
+  area from S2's oriented polygon: the fan cannot tell its two sides apart. A plate of half the
+  sphere was rebuilt nearly empty and accepted, and the step refused it.
 - `RegionWorld._initiate` lets a world with `continents_override` set put a continental plate
   (`CONTINENTAL_SHARE` continent or more) over an oceanic one when a trench starts between them. The
   core's own rule looks 150 km either side, which on a continent's passive margin finds ocean on

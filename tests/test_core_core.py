@@ -199,3 +199,15 @@ class NearlyGlobalPlateTests(unittest.TestCase):
         piece, lost = sphere.part(rings, whole_km2=whole)
         self.assertAlmostEqual(sphere.area_km2(piece) / whole, 1., places=4)
         self.assertLess(lost, 1e-4 * whole)
+
+
+class HalfSpherePlateTests(unittest.TestCase):
+    def test_a_plate_of_half_the_sphere_rotates_with_its_area(self):
+        """Its main loop encloses just over half the sphere: the fan reads it as a clockwise loop of
+        just under half, and S2's rebuild of it, nearly empty, was accepted unchecked. The fixture is
+        the plate as a thousand-Myr run met it, pickled as S2 had it."""
+        import pickle
+        with open(Path(__file__).parent / 'fixtures' / 'half_sphere_plate.pkl', 'rb') as f:
+            geography, matrix, tolerance = pickle.load(f)
+        moved = sphere.rotate_geography(geography, matrix, tolerance)
+        self.assertAlmostEqual(sphere.area_km2(moved) / sphere.area_km2(geography), 1., places=5)

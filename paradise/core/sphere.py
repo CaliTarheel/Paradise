@@ -468,8 +468,23 @@ def part(rings, minimum_km2=1e-6, whole_km2=None):
             # A clockwise shell (a plate covering most of the sphere, written as a hole's boundary)
             # encloses the sphere less its own area.
             enclosed = sum(shell) if sum(shell) > 0. else SPHERE_KM2 + sum(shell)
+        else:
+            # A loop near half the sphere: its area by the fan cannot tell its two sides apart, but S2
+            # can, from the loop's order. A plate of half the sphere was otherwise rebuilt nearly empty
+            # and the result accepted unchecked.
+            enclosed = 0.
+            for loop, a in zip(loops, shell):
+                if abs(a) < .45 * SPHERE_KM2:
+                    enclosed += a
+                    continue
+                try:
+                    enclosed += area_km2(polygon(loop))
+                except (ValueError, RuntimeError):
+                    enclosed = None
+                    break
+        if enclosed is not None:
             expected = enclosed - sum(cut)
-            if abs(area_km2(whole) - expected) > max(1., 1e-4 * expected):
+            if abs(area_km2(whole) - expected) > max(1., 1e-4 * abs(expected)):
                 whole = None
     if whole is not None:
         area = area_km2(whole)
