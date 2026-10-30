@@ -53,6 +53,7 @@ LARGE_SHARE, LARGE_CM_YR = .35, 1.
 # A plate carrying this much continent drifts as a continental plate, however much ocean it has
 # gathered at its ridges (the pieces of a rifted Pangaea grow large and mostly oceanic).
 CONTINENTAL_KM2 = 10e6
+POLE_STEER_DEG = 50.     # a drifting plate centred beyond this latitude is steered back
 # A rifted plate goes on moving away from its parent for this long, at SEPARATION_CM_YR. With
 # 60 Myr at 3 cm/yr, a Pangaea's pieces had parted by narrow seaways after 300 Myr.
 SEPARATION_MYR, SEPARATION_CM_YR = 100., 4.
@@ -307,6 +308,13 @@ class Advisor:
             turn = sphere.unit(self.rng.normal(size=3))
             direction = base + .6 * turn + (RIDGE_WEIGHT * push if push is not None else 0.)
             direction = sphere.unit(direction - np.dot(direction, centre) * centre)
+            # Steer away from the poles: drifting at random, continents came to sit over them.
+            lat = math.degrees(math.asin(max(-1., min(1., float(centre[2])))))
+            if abs(lat) > POLE_STEER_DEG:
+                # About this axis the centre moves towards the equator: (c x z) x c points north.
+                equatorward = sphere.unit(np.cross(centre, [0., 0., 1.])) * (-1. if lat > 0 else 1.)
+                weight = (abs(lat) - POLE_STEER_DEG) / (90. - POLE_STEER_DEG)
+                direction = sphere.unit(direction + 2. * weight * equatorward)
             left = STAGE_STEPS
         self.drift[plate] = (direction, left - 1)
         if continental:
