@@ -39,7 +39,8 @@ ARC_MIN_KM2 = 1000.          # an arc smaller than this is not worth keeping
 TERRANE_MAX_KM2 = 1e6        # about Japan and Kamchatka together; anything larger collides
 # Crumbs smaller than this are not terranes: the core takes continent arriving at a trench in pieces
 # this small as shortening, without collision.
-TERRANE_MIN_KM2 = 5000.
+TERRANE_MIN_KM2 = 15000.     # Artifexia's arcs are about 24,000 km2; its smallest terranes 60,000
+ACCRETIONS_PER_SUBSTEP = 3   # more than this a sub-step were crumbs passed back and forth
 # A terrane that has just accreted does not accrete again this soon. Where two plates meet along
 # trenches of both polarities, it would otherwise pass from one plate to the other and straight back.
 SETTLE_MYR = 10.
@@ -179,7 +180,7 @@ def accrete(world, features: list, rotations: dict, dt: float) -> list:
     """Hand terranes about to reach a trench to the overriding plate; returns 'accreted' events."""
     import copy
     events = []
-    for _ in range(8):   # each accretion changes the boundaries, so look again until none is left
+    for _ in range(ACCRETIONS_PER_SUBSTEP):   # each changes the boundaries, so look again each time
         found = _next_accretion(world, features, rotations, dt)
         if found is None:
             break
@@ -198,24 +199,24 @@ def accrete(world, features: list, rotations: dict, dt: float) -> list:
     return events
 
 
-def _settling(world, features, part) -> bool:
-    """Whether `part` (world frame) is mostly a terrane that accreted less than SETTLE_MYR ago."""
+def _settling_shapes(world, features) -> list:
+    """Terranes that accreted less than SETTLE_MYR ago, in the world frame."""
+    return [sphere.rotate_geography(f.shape, world.frame(f.plate), tolerance=1e-4) for f in features
+            if f.kind == 'terrane' and f.accreted and world.time_myr - f.accreted[-1]['time_myr'] < SETTLE_MYR
+            and f.plate in world.regions]
+
+
+def _settling(settling, part) -> bool:
+    """Whether `part` (world frame) is mostly one of the `settling` terranes."""
     area = sphere.area_km2(part)
-    for f in features:
-        if f.kind != 'terrane' or not f.accreted or world.time_myr - f.accreted[-1]['time_myr'] >= SETTLE_MYR:
-            continue
-        if f.plate not in world.regions:
-            continue
-        shape = sphere.rotate_geography(f.shape, world.frame(f.plate), tolerance=1e-4)
-        if sphere.area_km2(sphere.intersection(shape, part)) > .5 * area:
-            return True
-    return False
+    return any(sphere.area_km2(sphere.intersection(shape, part)) > .5 * area for shape in settling)
 
 
 def _next_accretion(world, features, rotations, dt):
     barred = getattr(world, 'no_accretion', ())
     largest = getattr(world, 'terrane_max_km2', TERRANE_MAX_KM2)   # a project's own limit
     pieces = {}   # downgoing plate -> its continental pieces in the world frame, worked out once
+    settling = _settling_shapes(world, features)
 
     def continental_parts(plate):
         if plate not in pieces:
@@ -254,7 +255,7 @@ def _next_accretion(world, features, rotations, dt):
             area = sphere.area_km2(part)
             if TERRANE_MIN_KM2 <= area <= largest:
                 distance = _distance_km(part, line)
-                if distance <= reach and not _settling(world, features, part):
+                if distance <= reach and not _settling(settling, part):
                     return part, distance, over, down, [p for p in parts if p is not part]
     return None
 
@@ -267,6 +268,8 @@ def _transfer(world, features, rotations, part, distance, over, down, others) ->
     zone = sphere.intersection(zone, world.regions[down])
     for other in others:   # never a bite out of the plate's other continents
         zone = sphere.difference(zone, other)
+    if sphere.area_km2(zone) < TERRANE_MIN_KM2:
+        raise ValueError('nothing to accrete there')   # undone by accrete(), like any failed transfer
     to_down, to_over = world.frame(down).T, world.frame(over).T
     local = sphere.rotate_geography(zone, to_down, tolerance=1e-4)
     moved, kept = [], []
@@ -313,7 +316,13 @@ def _transfer(world, features, rotations, part, distance, over, down, others) ->
         features.append(Feature(ident, 'terrane', over, zone_over, world.time_myr,
                                 'microcontinent from plate %d' % down, [dict(record)]))
         carried = [ident]
-    world.regions = world._from_crust()
+    # Only the two plates changed: rebuilding every plate's region took half an accretion's time.
+    for p in (down, over):
+        shapes = [c.shape for c in world.crust if c.plate == p]
+        if shapes:
+            world.regions[p] = sphere.rotate_geography(sphere.union(*shapes), world.frame(p))
+        else:
+            world.regions.pop(p, None)
     world.boundaries = world._derive(world._index(), rotations)
     # The boundary round the new terrane can bulge further outboard than the core carries a
     # segment's state (INHERIT_KM), and would come back as an ordinary converging boundary. The
