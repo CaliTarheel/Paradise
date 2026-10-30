@@ -59,6 +59,35 @@ class AdvisorTests(unittest.TestCase):
             self.assertNotEqual(e['overriding'], 1)
 
 
+class ClockTests(unittest.TestCase):
+    def snapshot(self, time_myr, *events):
+        class Snapshot:
+            pass
+        s = Snapshot()
+        s.time_myr, s.entries = time_myr, [dict(events=list(events))]
+        return s
+
+    def test_a_detached_old_ocean_does_not_reset_the_rift_clock(self):
+        a = advice.Advisor(1)
+        a.committed(self.snapshot(50., dict(kind='rift', plate=3, new=9, name='Plate 3 old ocean')))
+        self.assertNotIn(3, a.last_rift)
+        self.assertEqual(a.last_rift[9], 50.)
+        a.pending = {3: np.zeros(3)}
+        a.committed(self.snapshot(60., dict(kind='rift', plate=3, new=10, name='Plate 3 rift')))
+        self.assertEqual(a.last_rift[3], 60.)
+        self.assertIn(10, a.spreading)
+
+    def test_the_clocks_are_read_back_from_a_history(self):
+        class History:
+            pass
+        h = History()
+        h.snapshots = [None, self.snapshot(10., dict(kind='rift', plate=1, new=2, name='Plate 1 rift')),
+                       self.snapshot(20., dict(kind='rift', plate=2, new=3, name='Plate 2 old ocean'))]
+        a = advice.Advisor(1)
+        a.remember(h)
+        self.assertEqual(a.last_rift, {1: 10., 2: 10., 3: 20.})
+        self.assertEqual(a.last_detach, {2: 20.})
+
 
 class PangaeaTests(unittest.TestCase):
     def test_a_rifted_pangaea_comes_apart_and_stays_apart(self):

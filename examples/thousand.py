@@ -57,9 +57,8 @@ def main():
                                              summary(history.current)), flush=True)
     advisor = Advisor(args.seed, rift_at_start=not project.steps)
     if project.steps:
-        # Carrying on: the advisor's memory of rifts is not saved, so every plate counts as just
-        # rifted, rather than all rifting at once.
-        advisor.last_rift = {p: history.current.time_myr for p in history.current.world.plates()}
+        # Carrying on: the advisor's memory of rifts is not saved; it is read back from the history.
+        advisor.remember(history)
     while len(project.steps) < args.steps:
         poles, events, reasons = advisor.propose(history)
         t = time.time()

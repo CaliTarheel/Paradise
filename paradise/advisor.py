@@ -74,6 +74,11 @@ RIDGE_PLATE_SHARE, RIDGE_OCEAN_AGE_MYR, RIDGE_TENURE_MYR = .08, 80., 40.
 OLD_OCEAN_MYR, OLD_OCEAN_KM2, COLLAPSE_CM_YR = 160., 8e6, 4.
 
 
+def _detached(event) -> bool:
+    """Whether a rift event is a plate's old ocean detached (rifting.split_off names the new plate)."""
+    return event.get('name', '').endswith('old ocean')
+
+
 def _cm_yr_to_rad_myr(cm_yr, axis, centre):
     """The rotation rate (radians per Myr) about `axis` that moves `centre` at `cm_yr`.
 
@@ -97,6 +102,9 @@ class Advisor:
         self.rift_at_start = rift_at_start
         self.drift = {}          # plate -> (rotation vector, steps left in its stage)
         self.last_rift = {}      # plate -> time it last rifted (or was made)
+        # plate -> time its old ocean was last detached. A clock of its own: on the rift clock, a
+        # supercontinent shedding its old ocean every RIDGE_TENURE_MYR never came due to rift.
+        self.last_detach = {}
         # A plate made by a rift goes on moving away from its parent for RIFT_TENURE_MYR: child ->
         # (parent, separating rotation, until). Left to drift on its own, it often turned back,
         # closed the young ocean and, with rigid continents, welded again at once.
@@ -157,7 +165,8 @@ class Advisor:
         """Detach the old ocean of continental plates that have much of it."""
         events = []
         for p in world.plates():
-            if p in rifting or world.time_myr - self.last_rift.get(p, 0.) < RIDGE_TENURE_MYR:
+            if p in rifting or world.time_myr - max(self.last_rift.get(p, 0.), self.last_detach.get(p, 0.)) \
+                    < RIDGE_TENURE_MYR:
                 continue
             continent = [c for c in world.crust if c.plate == p and c.kind == 'continent']
             if sum(c.area_km2() for c in continent) < CONTINENTAL_KM2:
@@ -173,7 +182,7 @@ class Advisor:
             axis = sphere.unit(np.cross(ocean_at, towards))
             rate = _cm_yr_to_rad_myr(COLLAPSE_CM_YR, axis, ocean_at)
             parent = pole_vector(*poles[p]) if p in poles else np.zeros(3)
-            self.last_rift[p] = world.time_myr
+            self.last_detach[p] = world.time_myr
             reasons.append('the old ocean of plate %d is detached, to go down beneath its continent' % p)
             events.append(dict(kind='detach', plate=p, min_age_myr=OLD_OCEAN_MYR,
                                pole=[round(v, 4) for v in vector_pole(parent + axis * rate)]))
@@ -365,12 +374,26 @@ class Advisor:
         return [dict(kind='rift', plate=plate, points=[[round(float(a), 3), round(float(b), 3)] for a, b in zip(lon, lat)],
                      new_side='left', pole=[round(v, 4) for v in vector_pole(parent + sphere.unit(away) * rate)])]
 
+    def remember(self, history):
+        """Recover the rift clocks from a history made before this advisor existed (carrying on a run)."""
+        for snapshot in history.snapshots[1:]:
+            for e in (snapshot.entries[0].get('events', []) if snapshot.entries else []):
+                if e.get('kind') != 'rift':
+                    continue
+                self.last_rift[e['new']] = snapshot.time_myr
+                if _detached(e):
+                    self.last_detach[e['plate']] = snapshot.time_myr
+                else:
+                    self.last_rift[e['plate']] = snapshot.time_myr
+
     def committed(self, snapshot):
         """Note what a committed step made: a plate made by a rift has just rifted, as has its parent."""
         for entry in snapshot.entries[:1]:
             for e in entry.get('events', []):
                 if e.get('kind') == 'rift':
                     self.last_rift[e['new']] = snapshot.time_myr
+                    if _detached(e):
+                        continue   # its old ocean went: not a rift of the plate itself
                     self.last_rift[e['plate']] = snapshot.time_myr
                     if e['plate'] in self.pending:
                         self.spreading[e['new']] = (e['plate'], self.pending[e['plate']],
