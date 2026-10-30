@@ -47,6 +47,12 @@ CONTINENTAL_SHARE = .3   # a plate this much continent or more is a continental 
 # supercontinent's) barely moves: every trench round it pulls a different way, and turning most of
 # the sphere at slab speed would carry everything on it.
 LARGE_SHARE, LARGE_CM_YR = .35, 1.
+# A plate carrying this much continent drifts as a continental plate, however much ocean it has
+# gathered at its ridges (the pieces of a rifted Pangaea grow large and mostly oceanic).
+CONTINENTAL_KM2 = 10e6
+# A rifted plate goes on moving away from its parent for this long, at SEPARATION_CM_YR. With
+# 60 Myr at 3 cm/yr, a Pangaea's pieces had parted by narrow seaways after 300 Myr.
+SEPARATION_MYR, SEPARATION_CM_YR = 100., 4.
 RIDGE_WEIGHT = .25
 INERTIA = .5             # how much of a plate's old rotation each new one keeps
 STAGE_STEPS = 5
@@ -60,9 +66,13 @@ RIDGE_PLATE_SHARE, RIDGE_OCEAN_AGE_MYR, RIDGE_TENURE_MYR = .08, 80., 40.
 
 
 def _cm_yr_to_rad_myr(cm_yr, axis, centre):
-    """The rotation rate (radians per Myr) about `axis` that moves `centre` at `cm_yr`."""
+    """The rotation rate (radians per Myr) about `axis` that moves `centre` at `cm_yr`.
+
+    An axis near the centre would need a fast spin to move the centre at all; the rate is held to
+    twice the plain one, so the plate's far edge never runs much faster than `cm_yr` either.
+    """
     s = float(np.linalg.norm(np.cross(axis, centre)))
-    return (cm_yr * 10. / sphere.RADIUS_KM) / max(s, .2)
+    return (cm_yr * 10. / sphere.RADIUS_KM) / max(s, .5)
 
 
 def _centre(geography):
@@ -99,6 +109,7 @@ class Advisor:
             centre = _centre(region)
             continent = sum(c.area_km2() for c in world.crust if c.plate == p and c.kind == 'continent')
             share = continent / max(sphere.area_km2(region), 1.)
+            continental = share >= CONTINENTAL_SHARE or continent >= CONTINENTAL_KM2
             torque = pull.get(p, np.zeros(3))
             trench_share = float(np.linalg.norm(torque)) / max(perimeter.get(p, 1.), 1.)
             if np.linalg.norm(torque) > 0.:
@@ -108,10 +119,10 @@ class Advisor:
                 pulled = True
                 self.drift.pop(p, None)
             else:
-                direction, speed = self._drifting(p, previous.get(p), push.get(p), share >= CONTINENTAL_SHARE)
+                direction, speed = self._drifting(p, previous.get(p), push.get(p), continental, centre)
                 pulled = False
-            if sphere.area_km2(region) >= LARGE_SHARE * sphere.SPHERE_KM2:
-                speed = min(speed, LARGE_CM_YR)
+            if not continental and sphere.area_km2(region) >= LARGE_SHARE * sphere.SPHERE_KM2:
+                speed = min(speed, LARGE_CM_YR)   # the global ocean, not a continent's plate
             if pulled:
                 reasons.append('plate %d: slab pull, %.1f cm/yr' % (p, min(speed, MAX_CM_YR)))
             rotation = direction * _cm_yr_to_rad_myr(min(speed, MAX_CM_YR), direction, centre)
@@ -249,12 +260,16 @@ class Advisor:
                 push[b.right] = push.get(b.right, np.zeros(3)) + np.cross(mid, -left) * length
         return {p: sphere.unit(v) for p, v in push.items() if np.linalg.norm(v) > 0.}
 
-    def _drifting(self, plate, old, push, continental=False):
+    def _drifting(self, plate, old, push, continental, centre):
+        """A drifting plate's rotation axis and speed. The axis is square to the plate's centre, so the
+        plate travels rather than spins: a random axis near the centre turned a continent in place
+        at 12 cm/yr round its edges."""
         direction, left = self.drift.get(plate, (None, 0))
         if direction is None or left <= 0:
             base = sphere.unit(old) if old is not None and np.any(old) else sphere.unit(self.rng.normal(size=3))
             turn = sphere.unit(self.rng.normal(size=3))
-            direction = sphere.unit(base + .6 * turn + (RIDGE_WEIGHT * push if push is not None else 0.))
+            direction = base + .6 * turn + (RIDGE_WEIGHT * push if push is not None else 0.)
+            direction = sphere.unit(direction - np.dot(direction, centre) * centre)
             left = STAGE_STEPS
         self.drift[plate] = (direction, left - 1)
         if continental:
@@ -295,7 +310,7 @@ class Advisor:
         lon, lat = sphere.to_lonlat(np.array(line))
         side = sphere.unit(np.cross(centre, heading))          # left of the line, along the sphere
         away = np.cross(centre, side)                           # turns the left side away from the line
-        rate = _cm_yr_to_rad_myr(3., sphere.unit(away), centre)
+        rate = _cm_yr_to_rad_myr(SEPARATION_CM_YR, sphere.unit(away), centre)
         # The new plate moves with its parent and away from it: a pole of its own in absolute terms
         # let the parent catch it up, collide and weld again within the step.
         parent = pole_vector(*poles[plate]) if plate in poles else np.zeros(3)
@@ -314,5 +329,5 @@ class Advisor:
                     self.last_rift[e['plate']] = snapshot.time_myr
                     if e['plate'] in self.pending:
                         self.spreading[e['new']] = (e['plate'], self.pending[e['plate']],
-                                                    snapshot.time_myr + RIFT_TENURE_MYR)
+                                                    snapshot.time_myr + SEPARATION_MYR)
         self.pending = {}
