@@ -25,7 +25,7 @@ import numpy as np
 import spherely
 
 from paradise import events as declared
-from paradise import orogeny, plumes, rifting, terranes
+from paradise import collide, orogeny, plumes, rifting, terranes
 from paradise.core import sphere
 from paradise.core.world import INITIATION_KM
 from paradise.paint import world_from_grid
@@ -306,10 +306,14 @@ class History:
         while remaining > 1e-9:
             rotations = _rotations(world, vectors)
             sub = min(remaining, SUBSTEP_MYR)
+            # Rigid continents about to touch weld where they are, before the core can overlap them.
+            welded = collide.weld_on_approach(world, rotations, sub) if self.project.rigid_continents else []
+            if welded:
+                rotations = _rotations(world, vectors)
             # Terranes about to reach a trench join the overriding plate before the core can collide them.
             accreted = terranes.accrete(world, features, rotations, sub)
             entry = world.step(rotations, sub)
-            entry['events'] = accreted + entry['events']
+            entry['events'] = welded + accreted + entry['events']
             remaining -= sub
             features = terranes.tidy(world, features)
             plumes.rehome_marks(world, hotspots)

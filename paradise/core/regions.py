@@ -45,7 +45,8 @@ TINY_KM2 = 1e-6     # areas below this are numerical
 CHECK_TOLERANCE = 1e-4  # of the sphere's area, per step (0.01%)
 CRUMB_KM2 = 100.        # detached bits of a plate smaller than this are left with it
 SUTURE_KM = 100.        # a collision that has closed this far welds its two plates into one
-CONTINENTAL_SHARE = .3  # with `continents_override`, a plate this much continent is a continental plate
+CONTINENTAL_SHARE = .3  # a plate this much continent is a continental plate (for the world rules below)
+CONTINENTAL_KM2 = 10e6  # and so is one carrying this much continent, however much ocean it has grown
 SIMPLIFY_KM2 = 100.     # a boundary vertex cutting off less than this with its neighbours is dropped
 SIMPLIFY_EVERY_MYR = 1. # outlines are simplified once this much time has passed, not every sub-step
 SIMPLIFY_GROWTH = 1.25  # or sooner, once the outlines have this many times the vertices they had after
@@ -870,11 +871,9 @@ class RegionWorld:
                 # And may weld only continental plates (`weld_continents_only`, Scotese's rule IV:
                 # only a big continent-continent collision stops subduction). An ocean plate that
                 # had picked up an accreted terrane otherwise welded to every continent it met.
-                if getattr(self, 'weld_continents_only', False):
-                    share = [sum(c.area_km2() for c in self.crust if c.plate == p and c.kind == 'continent')
-                             / max(sphere.area_km2(self.regions[p]), 1.) for p in (left, right)]
-                    if min(share) < CONTINENTAL_SHARE:
-                        continue
+                if getattr(self, 'weld_continents_only', False) and not (
+                        self._continental(left) and self._continental(right)):
+                    continue
                 keep, gone = sorted((left, right), key=lambda p: -sphere.area_km2(self.regions[p]))
                 area = sphere.area_km2(self.regions[gone])
                 sutures = getattr(self, 'sutures', [])
@@ -939,10 +938,8 @@ class RegionWorld:
                     # more) always overrides an oceanic one, however far its continent is from the
                     # boundary (`continents_override`): Worldbuilding Pasta's rule for its start.
                     if getattr(self, 'continents_override', False):
-                        share = {p: sum(c.area_km2() for c in self.crust if c.plate == p and c.kind == 'continent')
-                                 / max(sphere.area_km2(self.regions[p]), 1.) for p in (b.left, b.right)}
-                        if (share[b.left] >= CONTINENTAL_SHARE) != (share[b.right] >= CONTINENTAL_SHARE):
-                            over = b.left if share[b.left] > share[b.right] else b.right
+                        if self._continental(b.left) != self._continental(b.right):
+                            over = b.left if self._continental(b.left) else b.right
                     for j in run:
                         b.kinds[j], b.overriding[j] = 'trench', over
                     events.append(dict(kind='subduction_initiated', plates=(b.left, b.right), overriding=over,
@@ -958,7 +955,10 @@ class RegionWorld:
             / max(sphere.area_km2(self.regions[plate]), 1.)
 
     def _continental(self, plate) -> bool:
-        return self._continent_share(plate) >= CONTINENTAL_SHARE
+        if plate not in self.regions:
+            return False
+        continent = sum(c.area_km2() for c in self.crust if c.plate == plate and c.kind == 'continent')
+        return continent >= CONTINENTAL_KM2 or continent >= CONTINENTAL_SHARE * sphere.area_km2(self.regions[plate])
 
     def _collide(self, point, area, plate) -> list:
         """Trench segments where continent arrived (>= COLLISION_KM2 this step) become collision."""

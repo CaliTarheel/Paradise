@@ -55,6 +55,9 @@ Poly-Time's tests for these modules are in `tests/test_core_*.py`.
 - `RegionWorld.step` merges ocean into age bands of the world's `age_band_myr` when it has one
   (default `AGE_BAND_MYR`, 10 Myr). Bands 10 Myr apart made a thousand-Myr history carry five
   times the vertices of the hand-built Artifexia project, whose isochrons are its 50 Myr stages.
+- The world rules above share one test of a continental plate, `RegionWorld._continental`: a
+  `CONTINENTAL_SHARE` of it continent, or `CONTINENTAL_KM2` of continent however much ocean it has
+  grown at its ridges (a rifted Pangaea's pieces are mostly ocean before long).
 - `render.draw` writes to a file object as well as a path.
 - `RegionWorld._initiate` reads the closing needed to start a trench from the world's
   `initiation_km` attribute when it has one (default `INITIATION_KM`), so a project can leave every
