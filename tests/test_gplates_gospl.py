@@ -1,0 +1,97 @@
+"""The GPlates-to-goSPL pipeline on a small project made here: one continent on one plate."""
+import json
+import os
+import tempfile
+import unittest
+
+import numpy as np
+import pygplates
+
+from gplates_gospl import build, motion
+from gplates_gospl.elevation import Mesh, elevation, ocean_depth_m
+from gplates_gospl.mesh import icosphere
+from gplates_gospl.project import Project
+
+ROLES = {'ocean': ['ocean.gpml'], 'continent': ['continents.gpml'], 'orogeny_active': ['orogenies.gpml']}
+
+
+def make_project(directory):
+    """Plate 101 turns east 1 degree per Myr about the north pole, from 100 Ma (where it is drawn) to
+    the present; it carries a continent with a range down its middle, beside an ocean of crust
+    formed at 150 Ma on the fixed plate 102."""
+    with open(os.path.join(directory, 'rotation.rot'), 'w') as f:
+        f.write('101 0.0 90.0 0.0 100.0 000 !\n101 100.0 90.0 0.0 0.0 000 !\n')
+        f.write('102 0.0 90.0 0.0 0.0 000 !\n102 100.0 90.0 0.0 0.0 000 !\n')
+
+    def save(name, kind, plate, ring, begin=1000.):
+        feature = pygplates.Feature(pygplates.FeatureType.create_gpml(kind))
+        feature.set_geometry(pygplates.PolygonOnSphere(ring))
+        feature.set_reconstruction_plate_id(plate)
+        feature.set_valid_time(begin, -1e-3)
+        pygplates.FeatureCollection([feature]).write(os.path.join(directory, name))
+
+    save('continents.gpml', 'ContinentalCrust', 101, [(-20, -20), (-20, 20), (20, 20), (20, -20)])
+    save('orogenies.gpml', 'OrogenicBelt', 101, [(-15, -3), (-15, 3), (15, 3), (15, -3)])
+    save('ocean.gpml', 'OceanicCrust', 102, [(-60, 120), (60, 120), (60, -120), (-60, -120)], begin=150.)
+
+
+class PipelineTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.mkdtemp()
+        make_project(cls.directory)
+        cls.project = Project(cls.directory, ROLES)
+        nodes, cls.tris = icosphere(5)
+        cls.mesh = Mesh(nodes)
+
+    def test_the_icosphere_is_closed(self):
+        nodes, tris = icosphere(3)
+        self.assertEqual(len(nodes) - 3 * len(tris) // 2 + len(tris), 2)   # Euler characteristic
+        normals = np.cross(nodes[tris[:, 1]] - nodes[tris[:, 0]], nodes[tris[:, 2]] - nodes[tris[:, 0]])
+        self.assertTrue(np.all(np.einsum('ij,ij->i', normals, nodes[tris[:, 0]]) > 0.))
+
+    def test_land_stands_up_ranges_rise_and_the_ocean_deepens_with_age(self):
+        z = elevation(self.project, 100., self.mesh)['z']
+        lon, lat = self.mesh.lon, self.mesh.lat
+        interior = (np.abs(lat) < 12.) & (np.abs(lon - 10.) < 4.)
+        self.assertTrue(np.all(z[interior] > 0.))
+        ranges = (np.abs(lat) < 12.) & (np.abs(lon) < 2.)
+        self.assertGreater(z[ranges].mean(), z[interior].mean() + 1000.)
+        far = (np.abs(lat) < 40.) & (np.abs(((lon + 360.) % 360.) - 180.) < 30.)
+        np.testing.assert_allclose(z[far], ocean_depth_m(50.), atol=1.)   # crust of 150 Ma, at 100 Ma
+
+    def test_nodes_go_with_the_plate_of_their_crust(self):
+        ids = motion.plate_ids(self.project, 100., self.mesh)
+        on_land = (np.abs(self.mesh.lat) < 15.) & (np.abs(self.mesh.lon) < 15.)
+        self.assertTrue(np.all(ids[on_land] == 101))
+        moved = motion.carried(self.project, ids, self.mesh.xyz, 100., 90.)
+        dlon = (np.degrees(np.arctan2(moved[:, 1], moved[:, 0])) - self.mesh.lon + 540.) % 360. - 180.
+        np.testing.assert_allclose(dlon[on_land & (np.abs(self.mesh.lat) < 80.)], 10., atol=1e-6)
+        self.assertTrue(np.allclose(moved[ids == 102], self.mesh.xyz[ids == 102]))
+
+    def test_the_forcing_carries_goSPLs_own_surface_to_each_map(self):
+        with tempfile.TemporaryDirectory() as out:
+            ages, maps = build.build(self.directory, out, older=100., younger=70., every=10., level=5, roles=ROLES)
+            data = np.load(os.path.join(out, 'input', 'maps.npz'))
+            mesh = np.load(os.path.join(out, 'input', 'mesh.npz'))
+            nodes = mesh['v'] / build.RADIUS_M
+            # goSPL's fast mode, step by step: lift over the interval, then carry by interpolation.
+            surface = mesh['z']
+            for k in range(len(ages) - 1):
+                forcing = np.load(os.path.join(out, 'input', 'forcing_%03d.npz' % k))
+                years = (ages[k] - ages[k + 1]) * 1e6
+                moved = mesh['v'] + forcing['hdisp'] * years
+                surface = build.advected(surface + forcing['t'] * years, mesh['v'], moved)
+                np.testing.assert_allclose(surface, data['expected'][k + 1], atol=1e-6)
+            # Carried onto the fixed mesh the surface softens by about a node, no more.
+            self.assertLess(np.mean((surface > 0) != (data['z'][-1] > 0)), .05)
+            with open(os.path.join(out, 'forcing-check.yml')) as f:
+                config = json.load(f)
+            self.assertTrue(config['domain']['fast'])
+            self.assertEqual(config['time']['end'], 30e6)
+            self.assertEqual([e['start'] for e in config['tectonics']], [0., 10e6, 20e6])
+            self.assertTrue(np.allclose(np.linalg.norm(nodes, axis=1), 1.))
+
+
+if __name__ == '__main__':
+    unittest.main()
