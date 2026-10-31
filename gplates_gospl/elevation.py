@@ -28,6 +28,10 @@ _KM_PER_S2_M = RADIUS_KM / spherely.EARTH_RADIUS_METERS
 UNKNOWN_OCEAN_MYR = 80.          # crust no ocean layer covers is taken as this old
 CONTINENT_M, CRATON_M, COAST_M = 300., 550., 40.
 COAST_RAMP_KM = 250.             # land rises from the coast to its interior height over this
+# ... and goes on rising gently inland of it, and a range towards its middle, so that no stretch of
+# land is dead flat: 60% of land edges were, at 30 km goSPL's depression filling asked for 31 GB.
+INLAND_RISE_M_PER_KM, RANGE_RISE_PER_KM = .1, .0005
+DRAIN_M = .01                    # the least fall from one land node to the next on its way to the sea
 SHELF_M, SHELF_KM, SLOPE_KM = -120., 80., 220.
 OROGENY = {'orogeny_active': (3500., 180.), 'orogeny_former': (1800., 200.), 'orogeny_old': (700., 220.)}
 ARC_PEAK_M, ARC_FOOT_M, ARC_TAPER_KM = 900., -800., 60.
@@ -50,10 +54,18 @@ def _taper(inside_km, width_km):
 
 
 class Mesh:
-    """The nodes as unit vectors, S2 points and a k-d tree, made once."""
+    """The nodes as unit vectors, S2 points and a k-d tree, made once; with `triangles`, each node's
+    neighbours too, for draining the land (`drained`)."""
 
-    def __init__(self, nodes):
+    def __init__(self, nodes, triangles=None):
         self.xyz = np.asarray(nodes, float)
+        self.neighbours = None
+        if triangles is not None:
+            from scipy import sparse
+            t = np.asarray(triangles)
+            a = np.r_[t[:, 0], t[:, 1], t[:, 2], t[:, 1], t[:, 2], t[:, 0]]
+            b = np.r_[t[:, 1], t[:, 2], t[:, 0], t[:, 0], t[:, 1], t[:, 2]]
+            self.neighbours = sparse.csr_matrix((np.ones(len(a), bool), (a, b)), shape=(len(nodes),) * 2)
         lat = np.degrees(np.arcsin(np.clip(self.xyz[:, 2], -1., 1.)))
         lon = np.degrees(np.arctan2(self.xyz[:, 1], self.xyz[:, 0]))
         self.lon, self.lat = lon, lat
@@ -187,7 +199,8 @@ def elevation(project, age: float, mesh: Mesh) -> dict:
         sea_tree = cKDTree(mesh.xyz[~land])
         coast_km = sea_tree.query(mesh.xyz[land])[0] * RADIUS_KM
         interior = np.where(craton[land], CRATON_M, CONTINENT_M)
-        z[land] = COAST_M + (interior - COAST_M) * _taper(coast_km, COAST_RAMP_KM)
+        z[land] = COAST_M + (interior - COAST_M) * _taper(coast_km, COAST_RAMP_KM) \
+            + INLAND_RISE_M_PER_KM * np.maximum(coast_km - COAST_RAMP_KM, 0.)
         # The shelf and the slope down to the ocean floor.
         land_tree = cKDTree(mesh.xyz[land])
         off_km = land_tree.query(mesh.xyz[~land])[0] * RADIUS_KM
@@ -202,7 +215,8 @@ def elevation(project, age: float, mesh: Mesh) -> dict:
         lift = np.zeros(n)
         for _, polygon, centre, radius in _polygons(project, role, age):
             nodes, inside_km = _inside(mesh, polygon, centre, radius)
-            lift[nodes] = np.maximum(lift[nodes], height * _taper(inside_km + .5 * width / 3., width))
+            lift[nodes] = np.maximum(lift[nodes], height * (_taper(inside_km + .5 * width / 3., width)
+                                                            + RANGE_RISE_PER_KM * np.maximum(inside_km - width, 0.)))
         z += np.where(land, lift, .5 * lift)
 
     # Island arcs out of the sea; on a continent, a volcanic range.
@@ -228,4 +242,38 @@ def elevation(project, age: float, mesh: Mesh) -> dict:
     rift = _distance_to(mesh, _lines(project, 'rift', age), RIFT_KM)
     low = np.isfinite(rift) & land
     z[low] += RIFT_M * (1. - _taper(rift[low], RIFT_KM))
+    if mesh.neighbours is not None:
+        z = drained(z, mesh.neighbours)
     return dict(z=z, land=land, crust_age=crust_age)
+
+
+def drained(z, neighbours, fall=DRAIN_M):
+    """`z` with every closed depression on land filled, so that the land drains to the sea.
+
+    A priority flood from the sea (Barnes and others, 2014): each land node is raised, if need be,
+    to `fall` above the node it is reached from. Maps drawn from rules leave closed basins and
+    flats everywhere; at 30 km goSPL's depression filling met so many that its spill graph asked
+    for 33 GB. The land then drains to begin with, and goSPL makes its own lakes as it erodes.
+    """
+    import heapq
+    z = np.array(z, float)
+    indptr, indices = neighbours.indptr, neighbours.indices
+    done = z <= 0.
+    heap = []
+    for node in np.where(~done)[0]:
+        near = indices[indptr[node]:indptr[node + 1]]
+        if done[near].any():
+            heapq.heappush(heap, (z[node], int(node)))
+    queued = np.zeros(len(z), bool)
+    queued[[n for _, n in heap]] = True
+    while heap:
+        height, node = heapq.heappop(heap)
+        done[node] = True
+        for other in indices[indptr[node]:indptr[node + 1]]:
+            if done[other] or queued[other]:
+                continue
+            if z[other] < height + fall:
+                z[other] = height + fall
+            queued[other] = True
+            heapq.heappush(heap, (z[other], int(other)))
+    return z

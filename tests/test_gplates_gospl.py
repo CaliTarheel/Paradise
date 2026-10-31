@@ -69,6 +69,21 @@ class PipelineTests(unittest.TestCase):
         np.testing.assert_allclose(dlon[on_land & (np.abs(self.mesh.lat) < 80.)], 10., atol=1e-6)
         self.assertTrue(np.allclose(moved[ids == 102], self.mesh.xyz[ids == 102]))
 
+    def test_the_land_drains_to_the_sea(self):
+        from gplates_gospl.elevation import drained
+        nodes, tris = icosphere(5)
+        mesh = Mesh(nodes, tris)
+        lat = np.degrees(np.arcsin(nodes[:, 2]))
+        z = np.where(lat > 0., 500. - 400. * np.exp(-((lat - 45.) / 10.) ** 2), -3000.)   # a basin inland
+        out = drained(z, mesh.neighbours)
+        self.assertTrue(np.all(out >= z))
+        self.assertTrue(np.all(out[z <= 0.] == z[z <= 0.]))
+        # Every land node has a neighbour lower than itself, or the sea: no closed depression is left.
+        n = mesh.neighbours
+        for node in np.where(out > 0.)[0]:
+            near = n.indices[n.indptr[node]:n.indptr[node + 1]]
+            self.assertTrue((out[near] < out[node]).any(), node)
+
     def test_smoothing_keeps_land_and_sea_apart(self):
         from gplates_gospl.fields import smoothed
         nodes, _ = icosphere(4)

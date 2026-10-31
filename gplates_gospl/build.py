@@ -34,6 +34,7 @@ from gplates_gospl.project import ARTIFEXIA, Project
 
 RADIUS_M = 6371000.
 RAIN_M_YR = 1.
+OCEAN_FILL_M = -500.
 
 
 def stage_ages(older: float, younger: float, every: float) -> list:
@@ -53,7 +54,7 @@ def drawn_at(age: float, younger: float) -> float:
 def build(project_dir, out, older=2000., younger=1150., every=10., level=6, dt=1e5, roles=ARTIFEXIA, log=print):
     project = Project(project_dir, roles)
     nodes, tris = icosphere(level)
-    mesh = Mesh(nodes)
+    mesh = Mesh(nodes, tris)
     ages = stage_ages(older, younger, every)
     os.makedirs(os.path.join(out, 'input'), exist_ok=True)
     maps, ids_at = [], []
@@ -91,7 +92,10 @@ def build(project_dir, out, older=2000., younger=1150., every=10., level=6, dt=1
             domain=dict(npdata=['input/mesh', 'v', 'c', 'z'], flowdir=3, fast=fast, advect='interp'),
             time=dict(start=0., end=total, tout=every * 1e6, dt=dt),
             spl=dict(K=1.e-6, d=0.42, m=0.5),
-            diffusion=dict(hillslopeKa=0.5, hillslopeKm=2.0, nonlinKm=100., clinSlp=1.e-5),
+            # oFill: depressions are filled only above this depth. goSPL's default, -6,000 m, takes
+            # in nearly the whole ocean floor, whose age bands and trenches make countless pits:
+            # at 30 km its spill graph asked for 33 GB. Rivers need only the land and the shelves.
+            diffusion=dict(hillslopeKa=0.5, hillslopeKm=2.0, nonlinKm=100., clinSlp=1.e-5, oFill=OCEAN_FILL_M),
             sea=dict(position=0.),
             tectonics=events,
             climate=[dict(start=0., map=['input/rain', 'r'])],

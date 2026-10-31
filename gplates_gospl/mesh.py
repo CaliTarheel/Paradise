@@ -28,4 +28,23 @@ def icosphere(level: int) -> tuple:
         v0, v1, v2 = tris[:, 0], tris[:, 1], tris[:, 2]
         tris = np.concatenate((np.stack((v0, a, c), 1), np.stack((v1, b, a), 1),
                                np.stack((v2, c, b), 1), np.stack((a, b, c), 1)))
-    return nodes, tris
+    return _local_order(nodes, tris)
+
+
+def _local_order(nodes, tris):
+    """The same mesh with its nodes numbered along a space-filling (Morton) curve.
+
+    Without ParMETIS, PETSc's `simple` partitioner hands each MPI process a run of consecutive
+    node numbers. Numbered as subdivision makes them, those runs are scattered over the whole
+    sphere, so every process held nearly the whole mesh as halo: at 30 km one asked for 27.5 GB.
+    Numbered along the curve, a run of numbers is one patch of the sphere.
+    """
+    q = np.clip(((nodes + 1.) / 2. * (2 ** 21 - 1)).astype(np.uint64), 0, 2 ** 21 - 1)
+    key = np.zeros(len(nodes), np.uint64)
+    for bit in range(21):
+        for axis in range(3):
+            key |= ((q[:, axis] >> np.uint64(bit)) & np.uint64(1)) << np.uint64(3 * bit + axis)
+    order = np.argsort(key, kind='stable')
+    rank = np.empty(len(nodes), int)
+    rank[order] = np.arange(len(nodes))
+    return nodes[order], rank[tris]
