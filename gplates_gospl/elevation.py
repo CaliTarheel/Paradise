@@ -120,20 +120,41 @@ def _inside(mesh, polygon, centre, radius):
 
 
 def _lines(project, role, age):
+    """(S2 linestring, its vertices as unit vectors) for every polyline of `role` at `age`."""
     out = []
     for feature, geometry in project.reconstructed(role, age):
         if isinstance(geometry, pygplates.PolylineOnSphere):
             latlon = np.asarray(geometry.to_lat_lon_array(), float)
             if len(latlon) >= 2:
-                out.append(spherely.create_linestring([(float(b), float(a)) for a, b in latlon]))
+                line = spherely.create_linestring([(float(b), float(a)) for a, b in latlon])
+                xyz = np.asarray([p.to_xyz() for p in geometry.get_points()], float)
+                out.append((line, xyz))
     return out
 
 
-def _distance_to(mesh, geographies, within_km):
-    """Each node's distance (km) to the nearest of `geographies`, or inf beyond `within_km`."""
+def _distance_to(mesh, lines, within_km):
+    """Each node's distance (km) to the nearest of `lines`, or inf beyond `within_km`.
+
+    Only the nodes near a line are measured: those within `within_km` of a point along it, the
+    points no further apart than that. Measuring every node against every line took three
+    quarters of a 60 km map's time.
+    """
     d = np.full(len(mesh.xyz), np.inf)
-    for g in geographies:
-        d = np.minimum(d, np.asarray(spherely.distance(mesh.points, g)) * _KM_PER_S2_M)
+    step = within_km / RADIUS_KM
+    for line, xyz in lines:
+        a, b = xyz[:-1], xyz[1:]
+        angle = np.arccos(np.clip(np.einsum('ij,ij->i', a, b), -1., 1.))
+        points = [xyz[:1]]
+        for p, q, theta in zip(a, b, angle):
+            k = max(1, int(np.ceil(theta / step)))
+            t = np.linspace(0., 1., k + 1)[1:, None]
+            points.append(p * (1. - t) + q * t)
+        points = np.vstack(points)
+        points /= np.linalg.norm(points, axis=1, keepdims=True)
+        chord = 2. * np.sin(1.5 * within_km / RADIUS_KM / 2.)
+        near = np.unique(np.concatenate([np.asarray(n, int) for n in mesh.tree.query_ball_point(points, chord)]))
+        if len(near):
+            d[near] = np.minimum(d[near], np.asarray(spherely.distance(mesh.points[near], line)) * _KM_PER_S2_M)
     d[d > within_km] = np.inf
     return d
 

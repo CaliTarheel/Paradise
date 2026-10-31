@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import numpy as np
 
-# Mean edge length, km, by subdivision level: 6 is 120 km (40,962 nodes), 7 is 60 km (163,842).
-EDGE_KM = {5: 240., 6: 120., 7: 60., 8: 30.}
+# Mean edge length, km, by subdivision level: 6 is 120 km (40,962 nodes), 7 is 60 km (163,842),
+# 8 is 30 km (655,362), 9 is 15 km (2,621,442), 10 is 7.5 km (10,485,762).
+EDGE_KM = {5: 240., 6: 120., 7: 60., 8: 30., 9: 15., 10: 7.5}
 
 
 def icosphere(level: int) -> tuple:
