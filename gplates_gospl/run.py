@@ -71,11 +71,13 @@ def _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, p
     return results.read(output, results.outputs(output)[-1], v)
 
 
-def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt=None, log=print):
+def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt=None, erodibility=None, log=print):
     mesh = np.load(os.path.join(build_dir, 'input', 'mesh.npz'))
     maps = np.load(os.path.join(build_dir, 'input', 'maps.npz'))
     with open(os.path.join(build_dir, 'input.yml')) as f:
         template = json.load(f)
+    if erodibility is not None:
+        template['spl'] = dict(template['spl'], K=erodibility)
     v, cells = mesh['v'], mesh['c']
     nodes = v / np.linalg.norm(v, axis=1, keepdims=True)
     tree = cKDTree(nodes)
@@ -132,8 +134,10 @@ def main():
     parser.add_argument('--np', dest='processes', type=int, default=4)
     parser.add_argument('--smooth-km', type=float, default=400.)
     parser.add_argument('--dt', type=float)
+    parser.add_argument('--K', dest='erodibility', type=float,
+                        help="goSPL's stream-power erodibility; the build's is 1e-6, set for a 30 km mesh")
     args = parser.parse_args()
-    run(args.build, args.run, args.first, args.count, args.processes, args.smooth_km, args.dt,
+    run(args.build, args.run, args.first, args.count, args.processes, args.smooth_km, args.dt, args.erodibility,
         log=lambda s: print(s, flush=True))
 
 
