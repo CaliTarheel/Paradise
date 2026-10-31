@@ -8,7 +8,9 @@ fell from 26% to 21% of the sphere, and its highest point from 1,490 m to 150 m,
 is the build's plus the erosion and deposition so far, smoothed: what goSPL's surface lacks
 against the surface the forcing alone would have reached (`expected`), averaged over
 `--smooth-km`, land and sea apart. The regional height goes back to the reconstruction's; the
-valleys, basins and drainage goSPL has cut stay.
+valleys, basins and drainage goSPL has cut stay. The erosion and deposition still to come over the
+interval, going by the last interval's rates, are made up for as they happen; the first interval is
+run once beforehand to measure them (`spin_up/`).
 
 RUN_DIR keeps, per interval, goSPL's input and output (`interval_NNN/`), and the surface it ended
 on (`state_NNN.npz`: elevation `z` and cumulative erosion and deposition `ed` on the mesh).
@@ -26,9 +28,47 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from gplates_gospl import results
-from gplates_gospl.fields import advected, smoothed
+from gplates_gospl.fields import advected, sample, smoothed
 
 RADIUS_M = 6371000.
+
+
+class _Tree:
+    """The mesh as `fields.sample` takes it: anything with a k-d tree of its unit nodes."""
+
+    def __init__(self, tree):
+        self.tree = tree
+
+
+def _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, processes, dt, name):
+    """Run goSPL over interval `k` from `state` under `uplift`; its last output on the mesh."""
+    event = template['tectonics'][k]
+    years = event['end'] - event['start']
+    folder = os.path.join(run_dir, name)
+    os.makedirs(os.path.join(folder, 'input'), exist_ok=True)
+    np.savez_compressed(os.path.join(folder, 'input', 'mesh'), v=v, c=cells, z=state)
+    np.savez_compressed(os.path.join(folder, 'input', 'forcing'), hdisp=hdisp, t=uplift)
+    np.savez_compressed(os.path.join(folder, 'input', 'rain'),
+                        r=np.load(os.path.join(build_dir, 'input', 'rain.npz'))['r'])
+    config = dict(template)
+    config['time'] = dict(template['time'], start=event['start'], end=event['end'], tout=years)
+    if dt:
+        config['time']['dt'] = dt
+    config['tectonics'] = [dict(start=event['start'], end=event['end'], hdisp=['input/forcing', 'hdisp'],
+                                upsub=['input/forcing', 't'])]
+    config['climate'] = [dict(start=event['start'], map=['input/rain', 'r'])]
+    config['output'] = dict(dir='output', makedir=False)
+    with open(os.path.join(folder, 'input.yml'), 'w') as f:
+        json.dump(config, f, indent=1)
+    env = dict(os.environ, PETSC_OPTIONS='-petscpartitioner_type simple')
+    command = ['mpirun', '--allow-run-as-root', '-x', 'PETSC_OPTIONS', '-np', str(processes),
+               os.path.join(os.path.dirname(sys.executable), 'gospl'), '-i', 'input.yml']
+    with open(os.path.join(folder, 'gospl.log'), 'w') as out:
+        done = subprocess.run(command, cwd=folder, env=env, stdout=out, stderr=subprocess.STDOUT)
+    if done.returncode:
+        raise RuntimeError('goSPL failed on interval %d; see %s' % (k, os.path.join(folder, 'gospl.log')))
+    output = os.path.join(folder, 'output')
+    return results.read(output, results.outputs(output)[-1], v)
 
 
 def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt=None, log=print):
@@ -43,10 +83,10 @@ def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt
     last = len(ages) - 1 if count is None else min(len(ages) - 1, first + count)
     os.makedirs(run_dir, exist_ok=True)
     if first == 0:
-        state, ed = mesh['z'], np.zeros(len(v))
+        state, ed, recent = mesh['z'], np.zeros(len(v)), None
     else:
         saved = np.load(os.path.join(run_dir, 'state_%03d.npz' % first))
-        state, ed = saved['z'], saved['ed']
+        state, ed, recent = saved['z'], saved['ed'], saved['recent']
     for k in range(first, last):
         t0 = time.time()
         event = template['tectonics'][k]
@@ -55,41 +95,31 @@ def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt
         hdisp = forcing['hdisp']
         land = expected[k] > 0.
         lacking = smoothed(expected[k] - state, nodes, smooth_km, within=land, tree=tree)
-        uplift = forcing['t'] + lacking / years
-        folder = os.path.join(run_dir, 'interval_%03d' % k)
-        os.makedirs(os.path.join(folder, 'input'), exist_ok=True)
-        np.savez_compressed(os.path.join(folder, 'input', 'mesh'), v=v, c=cells, z=state)
-        np.savez_compressed(os.path.join(folder, 'input', 'forcing'), hdisp=hdisp, t=uplift)
-        np.savez_compressed(os.path.join(folder, 'input', 'rain'),
-                            r=np.load(os.path.join(build_dir, 'input', 'rain.npz'))['r'])
-        config = dict(template)
-        config['name'] = '%s, %g to %g Ma' % (template['name'], ages[k], ages[k + 1])
-        config['time'] = dict(template['time'], start=event['start'], end=event['end'], tout=years)
-        if dt:
-            config['time']['dt'] = dt
-        config['tectonics'] = [dict(start=event['start'], end=event['end'], hdisp=['input/forcing', 'hdisp'],
-                                    upsub=['input/forcing', 't'])]
-        config['climate'] = [dict(start=event['start'], map=['input/rain', 'r'])]
-        config['output'] = dict(dir='output', makedir=False)
-        with open(os.path.join(folder, 'input.yml'), 'w') as f:
-            json.dump(config, f, indent=1)
-        env = dict(os.environ, PETSC_OPTIONS='-petscpartitioner_type simple')
-        command = ['mpirun', '--allow-run-as-root', '-x', 'PETSC_OPTIONS', '-np', str(processes),
-                   os.path.join(os.path.dirname(sys.executable), 'gospl'),
-                   '-i', 'input.yml']
-        with open(os.path.join(folder, 'gospl.log'), 'w') as out:
-            done = subprocess.run(command, cwd=folder, env=env, stdout=out, stderr=subprocess.STDOUT)
-        if done.returncode:
-            raise RuntimeError('goSPL failed on interval %d; see %s' % (k, os.path.join(folder, 'gospl.log')))
-        got = results.read(os.path.join(folder, 'output'), results.outputs(os.path.join(folder, 'output'))[-1], v)
+        if recent is None:
+            # Spin-up: the first interval once as it is, for an erosion rate to anticipate.
+            got = _interval(build_dir, run_dir, template, k, state, forcing['t'] + lacking / years, hdisp,
+                            cells, v, processes, dt, 'spin_up')
+            # Its rates are where the plates took them; read back where the interval started.
+            moved = v + hdisp * years
+            recent = sample(_Tree(tree), got['erodep'] / years, moved / np.linalg.norm(moved, axis=1, keepdims=True))
+        # What erosion and deposition will do over the interval, going by the last one, is made
+        # up for as it happens: with only what they had done made up, every interval ended one
+        # interval's erosion down, and the land shrank from 26% of the sphere to 21% in each.
+        coming = smoothed(recent, nodes, smooth_km, within=land, tree=tree)
+        uplift = forcing['t'] + lacking / years - coming
+        got = _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, processes, dt,
+                        'interval_%03d' % k)
         moved = v + hdisp * years
         ed = advected(ed, v, moved) + got['erodep']
+        recent = got['erodep'] / years
         state = got['elev']
-        np.savez_compressed(os.path.join(run_dir, 'state_%03d' % (k + 1)), z=state, ed=ed)
+        np.savez_compressed(os.path.join(run_dir, 'state_%03d' % (k + 1)), z=state, ed=ed, recent=recent)
         d = state - maps['z'][k + 1]
         log('%7.2f Ma  %4.0f s  land %4.1f%% (map %4.1f%%)  top %5.0f m (map %5.0f)  rms from map %4.0f m'
+            '  eroded on land: median %3.0f m'
             % (ages[k + 1], time.time() - t0, 100 * (state > 0).mean(), 100 * (maps['z'][k + 1] > 0).mean(),
-               state.max(), maps['z'][k + 1].max(), np.sqrt((d ** 2).mean())))
+               state.max(), maps['z'][k + 1].max(), np.sqrt((d ** 2).mean()),
+               np.median(-got['erodep'][state > 0]) if (state > 0).any() else 0.))
     return state
 
 
