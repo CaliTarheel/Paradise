@@ -60,7 +60,10 @@ def _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, p
     config['output'] = dict(dir='output', makedir=False)
     with open(os.path.join(folder, 'input.yml'), 'w') as f:
         json.dump(config, f, indent=1)
-    env = dict(os.environ, PETSC_OPTIONS='-petscpartitioner_type simple')
+    # Ubuntu's PETSc has no ParMETIS to split the mesh between processes; PETSc's own simple
+    # partitioner stands in, unless the caller's PETSC_OPTIONS already say how.
+    env = dict(os.environ)
+    env.setdefault('PETSC_OPTIONS', '-petscpartitioner_type simple')
     command = ['mpirun', '--allow-run-as-root', '-x', 'PETSC_OPTIONS', '-np', str(processes),
                os.path.join(os.path.dirname(sys.executable), 'gospl'), '-i', 'input.yml']
     with open(os.path.join(folder, 'gospl.log'), 'w') as out:

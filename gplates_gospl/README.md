@@ -117,3 +117,67 @@ interval:
   given back what it loses, and at 120 km the mesh holds few nodes across a range.
 - **Full span:** 850 Myr at this level is about 85 intervals, roughly 12 hours.
 
+## Rainfall from ROCKE-3D
+
+`rocke3d.py` takes a world to ROCKE-3D and its climate back, in the formats of Aerie's
+`map_definitions/rocke3d_4x5`:
+
+- **Out.** `grid_npz` writes a stage's elevation as Aerie's 72 x 46 grid NPZ: land fraction,
+  mean, land and ocean elevations, and cell areas. Each cell is sampled on its own fine grid,
+  since 5 degrees of longitude at 86 N is under 40 km.
+- **Back.** `read_precipitation` reads the extractor's climate CSV (`pNN_mm_day` for twelve
+  months), weights each month by its length in days, and gives annual rainfall in m/yr.
+  `rain_on_mesh` interpolates that onto goSPL's mesh.
+- **Into a run.** `run.py --rain CLIMATE.csv` uses it in every interval.
+- **Stand-in.** `random_climate_csv` writes a made-up climate in the same CSV format, to prove the
+  route before a real ROCKE-3D run exists.
+
+ROCKE-3D's cells are about 450 km across, so the rain carries no rain shadows at goSPL's scale.
+goSPL's own orographic precipitation could add them.
+
+## Artifexia's last 50 Myr at 60 km
+
+Built at level 7 (163,842 nodes, about 60 km apart), 1200 to 1150 Ma, with a random climate
+read through the ROCKE-3D CSV route. Land rainfall is 0.05-1.8 m/yr, 0.45 on average. The run used
+`K = 2e-7`, steps of 250,000 years and 4 processes, at about 25-30 s a step.
+
+- **Mountains.** At 60 km they keep their height: the active belts stand at 5-6 km, against
+  under half the maps' heights at 120 km.
+- **Rivers.** They run off the ranges, and catchments follow the relief and the rain bands.
+- **Sediment.** It builds shelves and fills inland basins. Where a coastal range sheds into the
+  sea, deposits reach 6-7 km in 20 Myr. The loop restores the land each interval, so the supply
+  never runs out.
+
+## On a bigger machine
+
+goSPL is built on PETSc and MPI, and the mesh is the limit, not goSPL. Measured here (4 cores):
+
+| Level | Spacing | Nodes | Per goSPL step, 4 processes |
+| --- | --- | --- | --- |
+| 6 | 120 km | 40,962 | about 5 s |
+| 7 | 60 km | 163,842 | about 25-30 s |
+
+Level 9 (15 km, 2.6 million nodes) suits a machine of 24 cores and 128 GB. Level 10 (7.5 km,
+10.5 million) may fit.
+
+1. Install pygplates in the Python that builds, and goSPL with its MPI in the one that runs (see
+   *Running goSPL in this container*).
+2. Build the window:
+
+   ```bash
+   python -m gplates_gospl.build PROJECT OUT --from 1200 --to 1150 --every 10 --level 9
+   ```
+
+3. Run it:
+
+   ```bash
+   python -m gplates_gospl.run OUT RUN --np 22 --K 2e-7 --dt 2.5e5 --rain CLIMATE.csv
+   ```
+
+   `run.py` falls back to PETSc's simple partitioner, which Ubuntu's PETSc needs (it has no
+   ParMETIS). On a PETSc with ParMETIS, set `PETSC_OPTIONS=-petscpartitioner_type parmetis` (or
+   any other options) before running, and `run.py` keeps them.
+
+`K` needs tuning for each resolution. Watch the median erosion that `run.py` logs: it should level
+off, not climb interval on interval.
+
