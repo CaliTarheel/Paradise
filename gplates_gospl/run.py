@@ -40,7 +40,7 @@ class _Tree:
         self.tree = tree
 
 
-def _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, processes, dt, name):
+def _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, processes, dt, name, rain=None):
     """Run goSPL over interval `k` from `state` under `uplift`; its last output on the mesh."""
     event = template['tectonics'][k]
     years = event['end'] - event['start']
@@ -49,7 +49,7 @@ def _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, p
     np.savez_compressed(os.path.join(folder, 'input', 'mesh'), v=v, c=cells, z=state)
     np.savez_compressed(os.path.join(folder, 'input', 'forcing'), hdisp=hdisp, t=uplift)
     np.savez_compressed(os.path.join(folder, 'input', 'rain'),
-                        r=np.load(os.path.join(build_dir, 'input', 'rain.npz'))['r'])
+                        r=rain if rain is not None else np.load(os.path.join(build_dir, 'input', 'rain.npz'))['r'])
     config = dict(template)
     config['time'] = dict(template['time'], start=event['start'], end=event['end'], tout=years)
     if dt:
@@ -71,7 +71,8 @@ def _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, p
     return results.read(output, results.outputs(output)[-1], v)
 
 
-def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt=None, erodibility=None, log=print):
+def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt=None, erodibility=None, rain=None,
+        log=print):
     mesh = np.load(os.path.join(build_dir, 'input', 'mesh.npz'))
     maps = np.load(os.path.join(build_dir, 'input', 'maps.npz'))
     with open(os.path.join(build_dir, 'input.yml')) as f:
@@ -100,7 +101,7 @@ def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt
         if recent is None:
             # Spin-up: the first interval once as it is, for an erosion rate to anticipate.
             got = _interval(build_dir, run_dir, template, k, state, forcing['t'] + lacking / years, hdisp,
-                            cells, v, processes, dt, 'spin_up')
+                            cells, v, processes, dt, 'spin_up', rain)
             # Its rates are where the plates took them; read back where the interval started.
             moved = v + hdisp * years
             recent = sample(_Tree(tree), got['erodep'] / years, moved / np.linalg.norm(moved, axis=1, keepdims=True))
@@ -110,7 +111,7 @@ def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt
         coming = smoothed(recent, nodes, smooth_km, within=land, tree=tree)
         uplift = forcing['t'] + lacking / years - coming
         got = _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, processes, dt,
-                        'interval_%03d' % k)
+                        'interval_%03d' % k, rain)
         moved = v + hdisp * years
         ed = advected(ed, v, moved) + got['erodep']
         recent = got['erodep'] / years
@@ -134,10 +135,20 @@ def main():
     parser.add_argument('--np', dest='processes', type=int, default=4)
     parser.add_argument('--smooth-km', type=float, default=400.)
     parser.add_argument('--dt', type=float)
+    parser.add_argument('--rain', help="rainfall on the mesh (m/yr): an .npz with 'r', or a ROCKE-3D climate CSV "
+                                       "(Aerie's extractor format), interpolated onto the mesh")
     parser.add_argument('--K', dest='erodibility', type=float,
                         help="goSPL's stream-power erodibility; the build's is 1e-6, set for a 30 km mesh")
     args = parser.parse_args()
-    run(args.build, args.run, args.first, args.count, args.processes, args.smooth_km, args.dt, args.erodibility,
+    rain = None
+    if args.rain:
+        v = np.load(os.path.join(args.build, 'input', 'mesh.npz'))['v']
+        if args.rain.endswith('.npz'):
+            rain = np.load(args.rain)['r']
+        else:
+            from gplates_gospl import rocke3d
+            rain = rocke3d.rain_on_mesh(rocke3d.read_precipitation(args.rain), v)
+    run(args.build, args.run, args.first, args.count, args.processes, args.smooth_km, args.dt, args.erodibility, rain,
         log=lambda s: print(s, flush=True))
 
 

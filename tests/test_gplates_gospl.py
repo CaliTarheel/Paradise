@@ -102,5 +102,56 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue(np.allclose(np.linalg.norm(nodes, axis=1), 1.))
 
 
+class Rocke3dTests(unittest.TestCase):
+    def test_a_climate_goes_from_the_extractors_csv_onto_the_mesh(self):
+        from gplates_gospl import rocke3d
+        nodes, _ = icosphere(5)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'climate.csv')
+            rocke3d.random_climate_csv(path, seed=3)
+            with open(path) as f:
+                header = f.readline().strip().split(',')
+            self.assertEqual(header[:4], ['j', 'i', 't01_c', 'p01_mm_day'])
+            self.assertEqual(len(header), 29)
+            grid = rocke3d.read_precipitation(path)
+        self.assertEqual(grid.shape, (46, 72))
+        self.assertTrue(np.all(grid[0] == grid[0, 0]) and np.all(grid[-1] == grid[-1, 0]))   # caps
+        rain = rocke3d.rain_on_mesh(grid, nodes)
+        self.assertTrue(np.all(rain > 0.))
+        self.assertTrue(.3 < rain.mean() < 3.)   # m/yr
+        lat = np.degrees(np.arcsin(nodes[:, 2]))
+        self.assertGreater(rain[np.abs(lat) < 8.].mean(), rain[np.abs(np.abs(lat) - 25.) < 5.].mean())
+
+    def test_the_month_lengths_weight_the_annual_mean(self):
+        from gplates_gospl import rocke3d
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'climate.csv')
+            with open(path, 'w') as f:
+                f.write(','.join(['j', 'i'] + ['t%02d_c,p%02d_mm_day' % (m, m) for m in range(1, 13)]
+                                 + ['u_face_cm_s', 'v_face_cm_s', 'w_top_cm_s']) + '\n')
+                for j in range(46):
+                    for i in range(72):
+                        f.write('%d,%d,' % (j, i) + ','.join('0,%g' % (10. if m == 0 else 0.) for m in range(12))
+                                + ',nan,nan,nan\n')
+            grid = rocke3d.read_precipitation(path, month_days=[30] + [10] * 11)
+        np.testing.assert_allclose(grid, 10. * 30. / 140. * 365.25 / 1000.)
+
+    def test_a_world_goes_onto_aeries_grid(self):
+        from gplates_gospl import rocke3d
+        nodes, _ = icosphere(6)
+        z = np.where(nodes[:, 2] > .5, 1000., -4000.)   # land north of 30 N
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'grid.npz')
+            rocke3d.grid_npz(path, nodes, z)
+            grid = np.load(path)
+            self.assertEqual(grid['land_fraction'].shape, (46, 72))
+            self.assertAlmostEqual(float(grid['cell_area_steradian'][1:-1].sum() + grid['cell_area_steradian'][0, 0]
+                                         + grid['cell_area_steradian'][-1, 0]), 4. * np.pi, places=6)
+            lat = grid['latitude_deg_n']
+            self.assertTrue(np.all(grid['land_fraction'][lat > 34.] == 1.))
+            self.assertTrue(np.all(grid['land_fraction'][lat < 26.] == 0.))
+            np.testing.assert_allclose(grid['dominant_surface_elevation_m'][lat > 34.], 1000.)
+
+
 if __name__ == '__main__':
     unittest.main()
