@@ -144,14 +144,23 @@ goSPL's own orographic precipitation could add them.
 
 Built at level 7 (163,842 nodes, about 60 km apart), 1200 to 1150 Ma, with a random climate
 read through the ROCKE-3D CSV route. Land rainfall is 0.05-1.8 m/yr, 0.45 on average. The run used
-`K = 2e-7`, steps of 250,000 years and 4 processes, at about 25-30 s a step.
+`K = 2e-7`, steps of 250,000 years and 4 processes: about 10-14 s a step, 8 minutes an interval.
 
-- **Mountains.** At 60 km they keep their height: the active belts stand at 5-6 km, against
-  under half the maps' heights at 120 km.
-- **Rivers.** They run off the ranges, and catchments follow the relief and the rain bands.
-- **Sediment.** It builds shelves and fills inland basins. Where a coastal range sheds into the
-  sea, deposits reach 6-7 km in 20 Myr. The loop restores the land each interval, so the supply
-  never runs out.
+| Stage | Land (map) | Highest point (map) | RMS from map | Median eroded on land |
+| --- | --- | --- | --- | --- |
+| 1190 Ma | 30.3% (30.3%) | 5,328 m (5,799 m) | 514 m | 96 m |
+| 1180 Ma | 30.4% (30.5%) | 5,876 m (5,993 m) | 445 m | 98 m |
+| 1170 Ma | 30.5% (30.5%) | 5,194 m (5,805 m) | 397 m | 89 m |
+| 1160 Ma | 30.6% (30.5%) | 5,733 m (6,166 m) | 419 m | 88 m |
+| 1150 Ma | 30.7% (30.5%) | 5,159 m (5,808 m) | 472 m | 89 m |
+
+- **Land and peaks.** Land stays within a fifth of a point of the reconstruction. Peaks stay under
+  the map's height without climbing past it.
+- **Erosion.** It holds near 90 m per 10 Myr.
+- **Rivers.** They run off the ranges, with catchments following the relief and the rain bands.
+- **Sediment.** Shelves build along the coasts and inland basins fill.
+- **Limit.** Where a coastal range sheds into the sea, deposits reach several km over the run.
+  The loop restores the land each interval, so the sediment supply never runs out.
 
 ## On a bigger machine
 
