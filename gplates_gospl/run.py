@@ -113,6 +113,12 @@ def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt
         # interval's erosion down, and the land shrank from 26% of the sphere to 21% in each.
         coming = smoothed(recent, nodes, smooth_km, within=land, tree=tree)
         uplift = forcing['t'] + lacking / years - coming
+        # The corrections are smoothed, so they give a range back its average loss: crests, which
+        # lose least, gained more than they lost, and Artifexia's highest point climbed 450 m an
+        # interval past the map's. No node is lifted past the map's height where its plate takes
+        # it (`expected` carried by the build's forcing); erosion may still take it below.
+        target = expected[k] + forcing['t'] * years
+        uplift = np.minimum(uplift, np.maximum((target - state) / years, 0.))
         got = _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, processes, dt,
                         'interval_%03d' % k, rain)
         moved = v + hdisp * years
