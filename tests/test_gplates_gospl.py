@@ -69,6 +69,15 @@ class PipelineTests(unittest.TestCase):
         np.testing.assert_allclose(dlon[on_land & (np.abs(self.mesh.lat) < 80.)], 10., atol=1e-6)
         self.assertTrue(np.allclose(moved[ids == 102], self.mesh.xyz[ids == 102]))
 
+    def test_smoothing_keeps_land_and_sea_apart(self):
+        from gplates_gospl.fields import smoothed
+        nodes, _ = icosphere(4)
+        land = nodes[:, 0] > 0.
+        values = np.where(land, 100., -100.) + np.sin(60. * nodes[:, 2])
+        out = smoothed(values, nodes, 800., within=land)
+        self.assertTrue(np.all(out[land] > 98.) and np.all(out[~land] < -98.))   # no blur across the coast
+        self.assertLess(np.std(out[land]), np.std(values[land]) / 3.)              # the ripple is smoothed
+
     def test_the_forcing_carries_goSPLs_own_surface_to_each_map(self):
         with tempfile.TemporaryDirectory() as out:
             ages, maps = build.build(self.directory, out, older=100., younger=70., every=10., level=5, roles=ROLES)

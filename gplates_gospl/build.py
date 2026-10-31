@@ -25,9 +25,9 @@ import os
 import time
 
 import numpy as np
-from scipy.spatial import cKDTree
 
 from gplates_gospl import motion
+from gplates_gospl.fields import advected, sample
 from gplates_gospl.elevation import Mesh, elevation
 from gplates_gospl.mesh import EDGE_KM, icosphere
 from gplates_gospl.project import ARTIFEXIA, Project
@@ -48,25 +48,6 @@ def drawn_at(age: float, younger: float) -> float:
     """The age a stage's map is drawn at: the youngest stage a hair older, so that the features
     that end exactly there (Artifexia's all end at 1150 Ma) are still in it."""
     return age + .01 if abs(age - younger) < 1e-9 else age
-
-
-def sample(mesh, values, points, k=3):
-    """`values` (on the mesh nodes) at unit vectors `points`, inverse-distance weighted."""
-    d, i = mesh.tree.query(points, k=k)
-    w = 1. / np.maximum(d, 1e-12)
-    return (values[i] * w).sum(1) / w.sum(1)
-
-
-def advected(values, nodes, moved):
-    """`values` at the `moved` nodes, interpolated back onto `nodes` as goSPL's `interp` scheme does
-    it (`Tectonics._readAdvectionData`, `_advectPlates`): the three nearest moved nodes, weighted by
-    inverse distance, or the one that lands exactly on a node."""
-    d, i = cKDTree(moved).query(nodes, k=3)
-    w = np.divide(1., d, out=np.zeros_like(d), where=d != 0)
-    out = (w * values[i]).sum(1) / np.where(w.sum(1) > 0, w.sum(1), 1.)
-    exact = d[:, 0] == 0
-    out[exact] = values[i[exact, 0]]
-    return out
 
 
 def build(project_dir, out, older=2000., younger=1150., every=10., level=6, dt=1e5, roles=ARTIFEXIA, log=print):
