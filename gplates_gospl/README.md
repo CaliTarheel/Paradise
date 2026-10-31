@@ -97,6 +97,11 @@ forcing is the build's plus two corrections, each smoothed over 400 km with land
 The regional height returns to the reconstruction's; the valleys, basins and shelves goSPL makes
 stay. goSPL's `zfit` cannot do this: it resets only the sea floor.
 
+Smoothed corrections give a range back its average loss, and crests lose least. Without a limit,
+the highest point climbed about 450 m an interval past the map's, from 5,864 m to 6,708 m against
+5,600 m. So no node is lifted past the map's height where its plate takes it; erosion may still
+take it below.
+
 goSPL's example erodibility, `K = 1e-6`, is for a 30 km mesh. On the 120 km mesh it wore down
 2 km of land in 30 Myr, faster each interval. `K = 2e-7` settles.
 
@@ -150,15 +155,32 @@ read through the ROCKE-3D CSV route. Land rainfall is 0.05-1.8 m/yr, 0.45 on ave
 
 ## On a bigger machine
 
-goSPL is built on PETSc and MPI, and the mesh is the limit, not goSPL. Measured here (4 cores):
+goSPL is built on PETSc and MPI, and the mesh is the limit, not goSPL. Measured here (4 cores,
+15 GB):
 
-| Level | Spacing | Nodes | Per goSPL step, 4 processes |
+| Level | Spacing | Nodes | Per goSPL step, 4 processes | Memory |
+| --- | --- | --- | --- | --- |
+| 6 | 120 km | 40,962 | about 5 s | small |
+| 7 | 60 km | 163,842 | about 10-14 s | under 4 GB |
+| 8 | 30 km | 655,362 | about 90 s | about 15 GB: past this container's limit after two steps |
+
+Memory runs to about 22 KB a node.
+
+| Level | Spacing | Nodes | Memory needed |
 | --- | --- | --- | --- |
-| 6 | 120 km | 40,962 | about 5 s |
-| 7 | 60 km | 163,842 | about 25-30 s |
+| 9 | 15 km | 2.6 million | about 60 GB: a 24-core, 128 GB machine takes it |
+| 10 | 7.5 km | 10.5 million | about 230 GB: past that machine |
 
-Level 9 (15 km, 2.6 million nodes) suits a machine of 24 cores and 128 GB. Level 10 (7.5 km,
-10.5 million) may fit.
+Three things make a fine mesh run at all:
+
+- **`oFill`, in the `diffusion` section, set to -500 m.** goSPL fills depressions above this depth.
+  Its default, -6,000 m, takes in nearly the whole ocean floor, whose age bands and trenches make
+  countless pits. At 30 km its spill graph asked for 33 GB and the run died.
+- **Land that drains.** Each map's land is priority-flooded from the sea, continents rise
+  gently inland, and ranges rise towards their middles. 60% of land edges had been dead flat.
+- **Mesh numbering.** The nodes are numbered along a Morton curve, so that PETSc's simple
+  partitioner gives each process one patch of the sphere. Numbered as subdivision made them, each
+  process held most of the mesh as halo, and at 60 km a step took twice as long.
 
 1. Install pygplates in the Python that builds, and goSPL with its MPI in the one that runs (see
    *Running goSPL in this container*).
