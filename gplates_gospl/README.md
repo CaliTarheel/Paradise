@@ -18,6 +18,13 @@ For a project directory and a span of ages (`python -m gplates_gospl.build --hel
 | `input.yml` | goSPL with erosion and deposition |
 | `forcing-check.yml` | goSPL's `fast` mode: the forcing alone, no surface processes |
 
+A landscape run goes through `run.py`, interval by interval, not through `input.yml` in one go
+(see *Keeping the landscape on the reconstruction* below):
+
+```bash
+/opt/gospl-env/bin/python -m gplates_gospl.run BUILD_DIR RUN_DIR --np 4 --K 2e-7
+```
+
 goSPL time starts at 0 at the oldest stage and counts years forward.
 
 - **Elevation** (`elevation.py`) comes from what each reconstructed feature is, by rules of thumb:
@@ -69,3 +76,44 @@ Built at mesh level 6 (40,962 nodes, about 120 km apart), with stages 10 Myr apa
   - It stays within 150-520 m RMS of the maps throughout, with no drift.
   - 1.3-2% of nodes fall on the other side of sea level. This is coastlines and ranges carried
     across a 120 km mesh; a finer mesh narrows it.
+
+## Keeping the landscape on the reconstruction
+
+goSPL run in one go over the build's forcing erodes the land and nothing gives it back. In the
+first 10 Myr of Artifexia:
+
+| | goSPL in one go | Map |
+| --- | --- | --- |
+| Land | 21% of the sphere | 26% |
+| Highest point | 150 m | 1,490 m |
+
+`run.py` therefore runs one interval at a time from where the last one ended. The vertical
+forcing is the build's plus two corrections, each smoothed over 400 km with land and sea kept apart:
+
+- what erosion and deposition have changed so far (goSPL's surface against the emulated
+  surface without them);
+- what they will change over the coming interval, going by the last interval's rates.
+
+The regional height returns to the reconstruction's; the valleys, basins and shelves goSPL makes
+stay. goSPL's `zfit` cannot do this: it resets only the sea floor.
+
+goSPL's example erodibility, `K = 1e-6`, is for a 30 km mesh. On the 120 km mesh it wore down
+2 km of land in 30 Myr, faster each interval. `K = 2e-7` settles.
+
+First 50 Myr of Artifexia (2000 to 1950 Ma), mesh level 6, 4 processes, about 8 minutes an
+interval:
+
+| Stage | Land (map) | Highest point (map) | RMS from map | Median eroded on land |
+| --- | --- | --- | --- | --- |
+| 1990 Ma | 25.8% (26.3%) | 808 m (1,492 m) | 186 m | 104 m |
+| 1980 Ma | 25.8% (26.3%) | 645 m (1,566 m) | 325 m | 167 m |
+| 1970 Ma | 24.9% (26.3%) | 693 m (1,442 m) | 271 m | 180 m |
+| 1960 Ma | 25.1% (26.3%) | 705 m (1,715 m) | 254 m | 200 m |
+| 1950 Ma | 25.4% (26.4%) | 776 m (1,766 m) | 279 m | 209 m |
+
+- **What goSPL makes:** branching drainage across the supercontinent, sediment shelves along its
+  coasts, and the rift seaway the reconstruction opens.
+- **Peaks:** they stay well under the maps'. A range narrower than the 400 km smoothing is not
+  given back what it loses, and at 120 km the mesh holds few nodes across a range.
+- **Full span:** 850 Myr at this level is about 85 intervals, roughly 12 hours.
+
