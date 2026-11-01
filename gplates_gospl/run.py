@@ -13,7 +13,8 @@ interval, going by the last interval's rates, are made up for as they happen; th
 run once beforehand to measure them (`spin_up/`).
 
 RUN_DIR keeps, per interval, goSPL's input and output (`interval_NNN/`), and the surface it ended
-on (`state_NNN.npz`: elevation `z` and cumulative erosion and deposition `ed` on the mesh).
+on (`state_NNN.npz`: elevation `z`, cumulative erosion and deposition `ed`, and the standing
+`change` against the forcing alone, on the mesh).
 """
 from __future__ import annotations
 
@@ -138,7 +139,12 @@ def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt
         ed = advected(ed, v, moved) + got['erodep']
         recent = got['erodep'] / years
         state = got['elev']
-        np.savez_compressed(os.path.join(run_dir, 'state_%03d' % (k + 1)), z=state, ed=ed, recent=recent)
+        # `ed` adds up every interval's erosion and deposition, so where the forcing re-deepens a
+        # trench each interval and sediment refills it, it counts every refill (15 km of it at
+        # Artifexia's trenches). `change` is what stands: goSPL's surface against the surface the
+        # forcing alone reaches, cut valleys negative, sediment cover positive.
+        np.savez_compressed(os.path.join(run_dir, 'state_%03d' % (k + 1)), z=state, ed=ed, recent=recent,
+                            change=state - expected[k + 1])
         d = state - maps['z'][k + 1]
         log('%7.2f Ma  %4.0f s  land %4.1f%% (map %4.1f%%)  top %5.0f m (map %5.0f)  rms from map %4.0f m'
             '  eroded on land: median %3.0f m'

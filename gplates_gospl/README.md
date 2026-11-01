@@ -159,8 +159,31 @@ read through the ROCKE-3D CSV route. Land rainfall is 0.05-1.8 m/yr, 0.45 on ave
 - **Erosion.** It holds near 90 m per 10 Myr.
 - **Rivers.** They run off the ranges, with catchments following the relief and the rain bands.
 - **Sediment.** Shelves build along the coasts and inland basins fill.
-- **Limit.** Where a coastal range sheds into the sea, deposits reach several km over the run.
-  The loop restores the land each interval, so the sediment supply never runs out.
+- **Sediment.** Where a coastal range sheds into the sea, shelves build seaward.
+  - About 0.5% of the sphere goes from below -1,000 m to above -200 m: a median 140 km offshore,
+    under about 900 m of sediment.
+  - That is shelf progradation, as on real margins. Sinking the plate under the load (Airy, 70% of
+    the deposit) does not stop it: the room it makes is filled again, up to sea level.
+  - Another 0.4% shoals with no sediment at all: steep coasts smeared as the plates carry them
+    across a 60 km mesh. A finer mesh narrows it.
+  - The cumulative record `ed` reaches 15 km beside trenches. The forcing re-deepens a trench each
+    interval and sediment refills it, and `ed` counts every refill. `change` in each state file is
+    what stands.
+
+## Rain shadows
+
+`--orographic` reshapes the climate's rain over the current surface every interval
+(`rain.py`), since goSPL's own orographic model works only on flat meshes:
+
+- windward slopes wetter and the lee of higher ground drier;
+- winds by latitude band (easterly trades, westerlies, polar easterlies), dying away at the band
+  edges;
+- the climate's mean over a ROCKE-3D cell's width (450 km) kept, so rain is moved, never made.
+
+Across a 3 km range in the westerlies, the windward slope gets 1.14 times the climate's rain and
+the crest 1.22. The lee gets 0.6-0.7, recovering downwind. On Artifexia at 1150 Ma, land rain changes
+by 0.75-1.18 times. Its ranges are narrow beside the 450 km over which rain is kept. Real surface
+winds can replace the bands once Aerie's extractor supplies them.
 
 ## On a bigger machine
 
