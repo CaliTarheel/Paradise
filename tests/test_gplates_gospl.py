@@ -168,5 +168,33 @@ class Rocke3dTests(unittest.TestCase):
             np.testing.assert_allclose(grid['dominant_surface_elevation_m'][lat > 34.], 1000.)
 
 
+class RainShadowTests(unittest.TestCase):
+    def test_a_range_wets_its_windward_side_and_dries_its_lee(self):
+        from gplates_gospl import rain
+        from gplates_gospl.fields import smoothed
+        nodes, _ = icosphere(6)
+        lon = np.degrees(np.arctan2(nodes[:, 1], nodes[:, 0]))
+        lat = np.degrees(np.arcsin(nodes[:, 2]))
+        # A north-south range at 0 E, in the westerlies (30-60 N), on land from 20 W to 20 E.
+        z = np.where((np.abs(lon) < 20.) & (lat > 20.) & (lat < 70.), 200. + 3000. * np.exp(-(lon / 3.) ** 2), -4000.)
+        base = np.ones(len(nodes))
+        shaped = rain.orographic(base, z, nodes)
+        band = (lat > 40.) & (lat < 50.)
+        windward = band & (lon > -4.) & (lon < 1.5)     # the westerlies come from the west
+        lee = band & (lon > 1.5) & (lon < 8.)
+        self.assertGreater(shaped[windward].mean(), 1.1)
+        self.assertLess(shaped[lee].mean(), .8)
+        np.testing.assert_allclose(smoothed(shaped, nodes, 1500.)[band], 1., atol=.15)   # moved, not made
+
+    def test_the_trades_blow_from_the_east_and_the_westerlies_from_the_west(self):
+        from gplates_gospl import rain
+        nodes = np.array([[1., 0., 0.], [np.cos(np.radians(45.)), 0., np.sin(np.radians(45.))],
+                          [np.cos(np.radians(30.)), 0., np.sin(np.radians(30.))]])
+        wind = rain.winds(nodes)
+        self.assertLess(wind[0, 1], -.99)      # at 0 N, 0 E, blowing west
+        self.assertGreater(wind[1, 1], .99)    # at 45 N, blowing east
+        self.assertLess(np.linalg.norm(wind[2]), 1e-9)   # calm at 30 N
+
+
 if __name__ == '__main__':
     unittest.main()

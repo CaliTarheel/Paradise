@@ -29,6 +29,18 @@ SMAC_MONTH_DAYS = [44, 45, 44, 44, 45, 44, 44, 45, 44, 44, 45, 44]
 DAYS_PER_YEAR = 365.25   # goSPL's year: rainfall in m/yr
 
 
+def cell_of(nodes):
+    """The grid cell (`j * 72 + i`) holding each unit vector; each polar cap is one cell."""
+    nodes = np.asarray(nodes, float)
+    nodes = nodes / np.linalg.norm(nodes, axis=1, keepdims=True)
+    lat = np.degrees(np.arcsin(np.clip(nodes[:, 2], -1., 1.)))
+    lon = np.degrees(np.arctan2(nodes[:, 1], nodes[:, 0]))
+    j = np.clip(np.searchsorted(LAT_BOUNDS, lat, side='right') - 1, 0, JM - 1)
+    i = np.clip(np.searchsorted(LON_BOUNDS, lon, side='right') - 1, 0, IM - 1)
+    i = np.where((j == 0) | (j == JM - 1), 0, i)
+    return j * IM + i
+
+
 def cell_area_steradian():
     band = np.sin(np.radians(LAT_BOUNDS[1:])) - np.sin(np.radians(LAT_BOUNDS[:-1]))
     area = np.outer(band, np.full(IM, np.radians(5.)))

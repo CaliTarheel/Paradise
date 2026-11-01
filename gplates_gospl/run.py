@@ -28,9 +28,11 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from gplates_gospl import results
+from gplates_gospl import rain as rain_shadows
 from gplates_gospl.fields import advected, sample, smoothed
 
 RADIUS_M = 6371000.
+SEDIMENT_SINK = 1. - 2300. / 3300.   # of a sediment load's thickness, the plate sinks this much
 
 
 class _Tree:
@@ -75,7 +77,7 @@ def _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, p
 
 
 def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt=None, erodibility=None, rain=None,
-        log=print):
+        orographic=False, log=print):
     mesh = np.load(os.path.join(build_dir, 'input', 'mesh.npz'))
     maps = np.load(os.path.join(build_dir, 'input', 'maps.npz'))
     with open(os.path.join(build_dir, 'input.yml')) as f:
@@ -86,6 +88,7 @@ def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt
     nodes = v / np.linalg.norm(v, axis=1, keepdims=True)
     tree = cKDTree(nodes)
     ages, expected = maps['ages'], maps['expected']
+    base_rain = rain if rain is not None else np.load(os.path.join(build_dir, 'input', 'rain.npz'))['r']
     last = len(ages) - 1 if count is None else min(len(ages) - 1, first + count)
     os.makedirs(run_dir, exist_ok=True)
     if first == 0:
@@ -102,25 +105,35 @@ def run(build_dir, run_dir, first=0, count=None, processes=4, smooth_km=400., dt
         land = expected[k] > 0.
         lacking = smoothed(expected[k] - state, nodes, smooth_km, within=land, tree=tree)
         if recent is None:
+            here_rain = rain_shadows.orographic(base_rain, state, nodes) if orographic else base_rain
             # Spin-up: the first interval once as it is, for an erosion rate to anticipate.
             got = _interval(build_dir, run_dir, template, k, state, forcing['t'] + lacking / years, hdisp,
-                            cells, v, processes, dt, 'spin_up', rain)
+                            cells, v, processes, dt, 'spin_up', here_rain)
             # Its rates are where the plates took them; read back where the interval started.
             moved = v + hdisp * years
             recent = sample(_Tree(tree), got['erodep'] / years, moved / np.linalg.norm(moved, axis=1, keepdims=True))
         # What erosion and deposition will do over the interval, going by the last one, is made
         # up for as it happens: with only what they had done made up, every interval ended one
         # interval's erosion down, and the land shrank from 26% of the sphere to 21% in each.
-        coming = smoothed(recent, nodes, smooth_km, within=land, tree=tree)
-        uplift = forcing['t'] + lacking / years - coming
+        # On land, the erosion to come is made up for as it happens (smoothed, so the valleys stay).
+        # At sea, sediment is not given room ahead of time: its weight presses the plate down by
+        # SEDIMENT_SINK of its thickness (Airy isostasy, sediment 2,300 over mantle 3,300 kg/m3),
+        # node by node, over the next interval. Smoothed like the land, deposits were let pile into
+        # deep water: 0.7% of the sphere shoaled from below -1,000 m to above -200 m in 50 Myr.
+        coming = np.where(land, smoothed(recent, nodes, smooth_km, within=land, tree=tree), 0.)
+        sinking = np.where(land, 0., SEDIMENT_SINK * np.maximum(recent, 0.))
+        uplift = forcing['t'] + lacking / years - coming - sinking
         # The corrections are smoothed, so they give a range back its average loss: crests, which
         # lose least, gained more than they lost, and Artifexia's highest point climbed 450 m an
         # interval past the map's. No node is lifted past the map's height where its plate takes
         # it (`expected` carried by the build's forcing); erosion may still take it below.
         target = expected[k] + forcing['t'] * years
+        here_rain = base_rain
+        if orographic:
+            here_rain = rain_shadows.orographic(base_rain, state, nodes)
         uplift = np.minimum(uplift, np.maximum((target - state) / years, 0.))
         got = _interval(build_dir, run_dir, template, k, state, uplift, hdisp, cells, v, processes, dt,
-                        'interval_%03d' % k, rain)
+                        'interval_%03d' % k, here_rain)
         moved = v + hdisp * years
         ed = advected(ed, v, moved) + got['erodep']
         recent = got['erodep'] / years
@@ -146,6 +159,8 @@ def main():
     parser.add_argument('--dt', type=float)
     parser.add_argument('--rain', help="rainfall on the mesh (m/yr): an .npz with 'r', or a ROCKE-3D climate CSV "
                                        "(Aerie's extractor format), interpolated onto the mesh")
+    parser.add_argument('--orographic', action='store_true',
+                        help='reshape the rain over the terrain each interval: rain shadows (gplates_gospl.rain)')
     parser.add_argument('--K', dest='erodibility', type=float,
                         help="goSPL's stream-power erodibility; the build's is 1e-6, set for a 30 km mesh")
     args = parser.parse_args()
@@ -158,6 +173,7 @@ def main():
             from gplates_gospl import rocke3d
             rain = rocke3d.rain_on_mesh(rocke3d.read_precipitation(args.rain), v)
     run(args.build, args.run, args.first, args.count, args.processes, args.smooth_km, args.dt, args.erodibility, rain,
+        args.orographic,
         log=lambda s: print(s, flush=True))
 
 
